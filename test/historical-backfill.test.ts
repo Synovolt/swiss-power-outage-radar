@@ -49,6 +49,7 @@ function target(patch: Partial<HistoricalBackfillTarget>): HistoricalBackfillTar
     updated_at: "2026-07-02 05:30:50",
     backfill_source_id: 9,
     backfill_source_url: "https://frapp.ch/fr/articles/stories/plus-de-2300-personnes-privees-delectricite-a-marly",
+    backfill_sort_at: "2026-07-02T05:30:50.000Z",
     ...patch
   };
 }

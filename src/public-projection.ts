@@ -561,7 +561,9 @@ interface BucketFilter {
 function bucketFilter(input: { operatorSlug?: string; placeSlug?: string; canton?: string; excludeId?: number }): BucketFilter {
   const filter: BucketFilter = { from: "public_events p", where: [], binds: [] };
   if (input.placeSlug) {
-    filter.from = "public_event_places pl INNER JOIN public_events p ON p.event_id = pl.event_id";
+    // CROSS JOIN: read the place's own rows first and sort those few. Left to
+    // the planner it walks the whole feed index and probes every event.
+    filter.from = "public_event_places pl CROSS JOIN public_events p ON p.event_id = pl.event_id";
     filter.where.push("pl.place_slug = ?");
     filter.binds.push(input.placeSlug);
   }
@@ -750,7 +752,7 @@ export async function summarizePublicSlice(
   const binds: unknown[] = [];
   let from = "public_events p";
   if (input.placeSlug) {
-    from = "public_event_places pl INNER JOIN public_events p ON p.event_id = pl.event_id";
+    from = "public_event_places pl CROSS JOIN public_events p ON p.event_id = pl.event_id";
     where.push("pl.place_slug = ?");
     binds.push(input.placeSlug);
   }
@@ -833,7 +835,7 @@ export async function getPublicPlace(db: D1Database, slug: string): Promise<Publ
     `SELECT pl.place_slug AS slug, MAX(pl.place_name) AS name, MAX(pl.canton) AS canton,
             COUNT(*) AS count, MAX(p.sort_at) AS last_at
      FROM public_event_places pl
-     INNER JOIN public_events p ON p.event_id = pl.event_id
+     CROSS JOIN public_events p ON p.event_id = pl.event_id
      WHERE pl.place_slug = ?
      GROUP BY pl.place_slug`
   ).bind(slug).first<{ slug: string; name: string; canton: string | null; count: number; last_at: string | null }>();

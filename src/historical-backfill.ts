@@ -5,6 +5,8 @@ export const HISTORICAL_BACKFILL_VERSION = "historical-backfill/v1";
 export interface HistoricalBackfillTarget extends OutageEvent {
   backfill_source_id: number;
   backfill_source_url: string;
+  /** COALESCE(received_at, first_seen_at): the target's position in the backfill queue. */
+  backfill_sort_at: string;
 }
 
 type CuratedFact = Omit<CandidateFactInput, "extractor_version" | "observed_at">;
