@@ -172,7 +172,8 @@ const views = ["now", "planned", "history"] as const;
 
     const copy = JSON.parse(document.querySelector("#radar-i18n")?.textContent || "{}") as RadarCopy;
     const VIEWS: RadarView[] = ["now", "planned", "history"];
-    const REFRESH_MS = 120_000;
+    // Each poll is a Worker invocation (100k/day on the free plan): keep it rare.
+    const REFRESH_MS = 600_000;
 
     const params = new URLSearchParams(location.search);
     const initialView = params.get("view") as RadarView | null;
@@ -188,7 +189,10 @@ const views = ["now", "planned", "history"] as const;
       selectedId: null as number | null,
       drawerOpen: false,
       loading: false,
-      error: false
+      error: false,
+      /** True while only the embedded "now" subset is loaded. */
+      partial: false,
+      embeddedCounts: null as Record<RadarView, number> | null
     };
 
     const $ = <T extends Element>(selector: string) => document.querySelector<T>(selector)!;
@@ -373,13 +377,13 @@ const views = ["now", "planned", "history"] as const;
       return mapInit;
     }
 
-    function syncPins(fit: boolean) {
+    function syncPins(fit: boolean, recenter = false) {
       if (!map || !mapReady) return;
       const items = visibleItems();
       const features = featuresFor(items);
       map.getSource("outages")?.setData({ type: "FeatureCollection", features });
       const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      if (state.selectedId != null) {
+      if (recenter && state.selectedId != null) {
         const selected = state.items.find((item) => item.id === state.selectedId);
         const coords = selected ? pinFor(selected) : null;
         if (coords) {
@@ -403,6 +407,11 @@ const views = ["now", "planned", "history"] as const;
 
     function renderControls() {
       const counts = viewCounts(state.items, state.nature, now());
+      // With only the "now" subset loaded, planned/history counts come from the server.
+      if (state.partial && state.embeddedCounts && !state.nature) {
+        counts.planned = state.embeddedCounts.planned;
+        counts.history = state.embeddedCounts.history;
+      }
       document.querySelectorAll<HTMLButtonElement>("[data-view]").forEach((button) => {
         const view = button.dataset.view as RadarView;
         button.setAttribute("aria-pressed", String(!searching() && view === state.view));
@@ -432,7 +441,10 @@ const views = ["now", "planned", "history"] as const;
         listEl.innerHTML = `<p class="radar__empty">${escapeText(message)}</p>`;
         return;
       }
+      const focusedId = (document.activeElement as HTMLElement | null)?.closest?.<HTMLElement>("a.radar-item[data-id]")?.dataset.id;
       listEl.innerHTML = groupsHtml(groupItems(shown, state.view, t, copy, searching()), t, copy, state.selectedId);
+      // Re-rendering replaces the rows; keep keyboard users where they were.
+      if (focusedId) listEl.querySelector<HTMLElement>(`a.radar-item[data-id="${focusedId}"]`)?.focus({ preventScroll: true });
     }
 
     function renderNote() {
@@ -483,7 +495,7 @@ const views = ["now", "planned", "history"] as const;
     function selectItem(id: number, opts: { openSheet?: boolean; scroll?: boolean } = {}) {
       state.selectedId = id;
       renderList();
-      syncPins(false);
+      syncPins(false, true);
       const item = state.items.find((entry) => entry.id === id);
       if (item && opts.openSheet && isMobile()) {
         setDrawer(false);
@@ -500,6 +512,7 @@ const views = ["now", "planned", "history"] as const;
 
     document.querySelectorAll<HTMLButtonElement>("[data-view]").forEach((button) => button.addEventListener("click", () => {
       state.view = button.dataset.view as RadarView;
+      if (state.partial && state.view !== "now") void loadIndex();
       state.limit = HISTORY_PAGE;
       if (searching()) {
         state.query = "";
@@ -521,6 +534,7 @@ const views = ["now", "planned", "history"] as const;
     let searchTimer = 0;
     searchEl.addEventListener("input", () => {
       window.clearTimeout(searchTimer);
+      if (state.partial) void loadIndex();
       searchTimer = window.setTimeout(() => {
         state.query = searchEl.value;
         state.limit = HISTORY_PAGE;
@@ -604,6 +618,8 @@ const views = ["now", "planned", "history"] as const;
     function applyIndex(payload: any) {
       state.items = fromIndex(payload);
       state.generatedAt = payload?.generatedAt ?? new Date().toISOString();
+      state.partial = Boolean(payload?.partial);
+      state.embeddedCounts = payload?.counts ?? null;
       state.error = false;
     }
 
@@ -633,6 +649,13 @@ const views = ["now", "planned", "history"] as const;
     if (embedded?.items) {
       applyIndex(embedded);
       render({ fit: true });
+      // Load the full index for search and the other views once the page is idle
+      // (or right away when the URL already asks for them).
+      if (state.view !== "now" || searching()) void loadIndex();
+      else {
+        const idle = (window as any).requestIdleCallback ?? ((callback: () => void) => window.setTimeout(callback, 2500));
+        idle(() => void loadIndex());
+      }
     } else {
       void loadIndex();
     }

@@ -58,7 +58,7 @@ import { refreshPublicProjection } from "./public-projection";
 import { refreshPublicAggregates } from "./public-stats";
 
 /** Bounded per cron run so a backlog never blows the 10 ms CPU / subrequest budget. */
-const PROJECTION_LIMIT_PER_RUN = 400;
+const PROJECTION_LIMIT_PER_RUN = 60;
 /** External geo.admin lookups per run for events that still lack a map pin. */
 const LOCATION_LOOKUPS_PER_RUN = 3;
 import { sendEventEmail } from "./email";

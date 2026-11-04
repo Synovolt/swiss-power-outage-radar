@@ -7,14 +7,14 @@ const slugs = (location: string, extra: Partial<Parameters<typeof derivePublicPl
 describe("derivePublicPlaces", () => {
   it("reads a two-letter canton suffix", () => {
     expect(derivePublicPlaces({ location: "Brugg AG" })).toEqual({
-      places: [{ slug: "brugg", name: "Brugg", canton: "AG" }],
+      places: [{ slug: "brugg-ag", name: "Brugg", canton: "AG" }],
       canton: "AG"
     });
   });
 
   it("treats a trailing canton name as context, not as a place", () => {
     expect(derivePublicPlaces({ location: "Brugg, Aargau" })).toEqual({
-      places: [{ slug: "brugg", name: "Brugg", canton: "AG" }],
+      places: [{ slug: "brugg-ag", name: "Brugg", canton: "AG" }],
       canton: "AG"
     });
   });
@@ -22,13 +22,13 @@ describe("derivePublicPlaces", () => {
   it("splits a list of municipalities and applies the trailing canton to all of them", () => {
     const result = derivePublicPlaces({ location: "Egliswil, Lenzburg, Seengen, Seon, Aargau" });
     expect(result.canton).toBe("AG");
-    expect(result.places.map((place) => place.slug)).toEqual(["egliswil", "lenzburg", "seengen", "seon"]);
+    expect(result.places.map((place) => place.slug)).toEqual(["egliswil-ag", "lenzburg-ag", "seengen-ag", "seon-ag"]);
     expect(result.places.every((place) => place.canton === "AG")).toBe(true);
   });
 
   it("keeps a single city that shares its canton's name as a place in that canton", () => {
     expect(derivePublicPlaces({ location: "Bern" })).toEqual({
-      places: [{ slug: "bern", name: "Bern", canton: "BE" }],
+      places: [{ slug: "bern-be", name: "Bern", canton: "BE" }],
       canton: "BE"
     });
   });
@@ -39,13 +39,13 @@ describe("derivePublicPlaces", () => {
 
   it("uses a precise geo.admin label as the place", () => {
     const result = derivePublicPlaces({ location: "Chavornay", label: "Chavornay (VD)", precision: "municipality" });
-    expect(result).toEqual({ places: [{ slug: "chavornay", name: "Chavornay", canton: "VD" }], canton: "VD" });
+    expect(result).toEqual({ places: [{ slug: "chavornay-vd", name: "Chavornay", canton: "VD" }], canton: "VD" });
   });
 
   it("takes the canton from an imprecise label but not the place", () => {
     const result = derivePublicPlaces({ location: "Orbe", label: "Jura-Nord vaudois (VD)", precision: "district" });
     expect(result.canton).toBe("VD");
-    expect(result.places.map((place) => place.slug)).toEqual(["orbe"]);
+    expect(result.places.map((place) => place.slug)).toEqual(["orbe-vd"]);
   });
 
   it("drops generic country-level locations", () => {
@@ -73,7 +73,7 @@ describe("derivePublicPlaces", () => {
 
   it("keeps the event canton when no other canton hint exists", () => {
     const result = derivePublicPlaces({ location: "Wohlen", eventCanton: "ag" });
-    expect(result).toEqual({ places: [{ slug: "wohlen", name: "Wohlen", canton: "AG" }], canton: "AG" });
+    expect(result).toEqual({ places: [{ slug: "wohlen-ag", name: "Wohlen", canton: "AG" }], canton: "AG" });
   });
 });
 

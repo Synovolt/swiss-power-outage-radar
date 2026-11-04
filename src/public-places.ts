@@ -95,10 +95,18 @@ export function derivePublicPlaces(input: PublicPlaceInput): { places: PublicPla
     for (const part of named) add(part.name, part.canton ?? canton);
   }
 
-  return {
-    places: places.map((place) => ({ ...place, canton: place.canton ?? canton })),
-    canton
-  };
+  // Swiss municipality names repeat across cantons (Buchs AG/SG/ZH, Wil SG/ZH,
+  // Kirchberg BE/SG), so the canton is part of the page identity when known.
+  const unique = new Set<string>();
+  const output: PublicPlace[] = [];
+  for (const place of places) {
+    const placeCanton = place.canton ?? canton;
+    const slug = placeCanton ? `${place.slug}-${placeCanton.toLowerCase()}` : place.slug;
+    if (unique.has(slug)) continue;
+    unique.add(slug);
+    output.push({ ...place, slug, canton: placeCanton });
+  }
+  return { places: output, canton };
 }
 
 export function placesKey(places: PublicPlace[]): string {

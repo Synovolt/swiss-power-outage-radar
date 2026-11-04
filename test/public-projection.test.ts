@@ -88,8 +88,8 @@ describe("projectPublicEvent", () => {
     expect(projection!.eventId).toBe(42);
     expect(projection!.canton).toBe("VD");
     expect(projection!.item.canton).toBe("VD");
-    expect(projection!.places).toEqual([{ slug: "chavornay", name: "Chavornay", canton: "VD" }]);
-    expect(projection!.item.places).toEqual([{ slug: "chavornay", name: "Chavornay" }]);
+    expect(projection!.places).toEqual([{ slug: "chavornay-vd", name: "Chavornay", canton: "VD" }]);
+    expect(projection!.item.places).toEqual([{ slug: "chavornay-vd", name: "Chavornay" }]);
     expect(projection!.operatorSlug).toBe("bkw");
     expect(projection!.item.operator_slug).toBe("bkw");
     expect(projection!.item.operator_name).toBeTruthy();

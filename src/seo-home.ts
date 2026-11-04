@@ -5,7 +5,7 @@
  * the compact index for instant client-side search, and a meta description
  * with today's numbers.
  */
-import { escapeHtml, inlineJson, setMetaContent } from "./html";
+import { escapeHtml, fetchTemplate, inlineJson, renderedHeaders, setMetaContent } from "./html";
 import { formatAppDate, homeFaqs, pathFor, radarViewCopy, t, type AppLocale } from "./i18n";
 import { DEFAULT_OG_IMAGE_PATH, SITE_ORIGIN, absoluteUrl } from "./public-url";
 import {
@@ -69,19 +69,21 @@ export function renderHomeAbout(locale: AppLocale): string {
 export async function renderHomeSeoAsset(
   env: Pick<Env, "ASSETS">,
   request: Request,
-  input: { index: PublicIndexPayload | null; now?: number }
+  input: { index: PublicIndexPayload | null; raw?: string | null; now?: number }
 ): Promise<Response> {
   const now = input.now ?? Date.now();
   const locale = (new URL(request.url).pathname.match(/^\/(fr|it|en)(?:\/|$)/)?.[1] ?? "de") as AppLocale;
   const homePath = pathFor({ kind: "home" }, locale);
-  const asset = await env.ASSETS.fetch(new Request(new URL(homePath, request.url), request));
+  const asset = await fetchTemplate(env.ASSETS, new URL(homePath, request.url));
   const canonical = absoluteUrl(homePath, SITE_ORIGIN);
   const ogImage = absoluteUrl(DEFAULT_OG_IMAGE_PATH, SITE_ORIGIN);
   const items = fromIndex(input.index);
   const copy = radarViewCopy(locale);
   const generatedAt = input.index?.generatedAt ?? new Date(now).toISOString();
   const description = homeLiveDescription(locale, homeLiveCounts(items, now), generatedAt);
-  const counts = viewCounts(items, "", now);
+  // The home subset carries counts over the full index; fall back to counting what we have.
+  const counts = input.index?.counts ?? viewCounts(items, "", now);
+  const embedded = input.raw ? input.raw.replace(/</g, "\\u003c") : input.index ? inlineJson(input.index) : "null";
   const listHtml = input.index ? renderHomeList(items, locale, now) : null;
   const asOf = copy.asOf.replace("{{date}}", formatAppDate(generatedAt, locale, { dateStyle: "short", timeStyle: "short" }) ?? "");
 
@@ -95,7 +97,7 @@ export async function renderHomeSeoAsset(
     .on('meta[name="twitter:image"]', setMetaContent(ogImage));
   if (input.index && listHtml !== null) {
     rewriter = rewriter
-      .on("#radar-index", { element(element) { element.setInnerContent(inlineJson(input.index), { html: true }); } })
+      .on("#radar-index", { element(element) { element.setInnerContent(embedded, { html: true }); } })
       .on("#radar-list", { element(element) { element.setInnerContent(listHtml, { html: true }); element.setAttribute("aria-busy", "false"); } })
       .on("#radar-count", { element(element) { element.setInnerContent(countLabel(counts.now, copy)); } })
       .on("#radar-note", { element(element) { element.setInnerContent(asOf); } })
@@ -109,9 +111,6 @@ export async function renderHomeSeoAsset(
   }
   return rewriter.transform(new Response(asset.body, {
     status: asset.status,
-    headers: {
-      ...Object.fromEntries(asset.headers),
-      "Cache-Control": "public,max-age=60,s-maxage=120,stale-while-revalidate=600"
-    }
+    headers: renderedHeaders(asset, "public,max-age=60,s-maxage=120,stale-while-revalidate=600")
   }));
 }

@@ -113,7 +113,8 @@ export function projectPublicEvent(row: ProjectionRow, facts: OutageFact[], now 
     operatorSlug: operator?.slug ?? null,
     sortBucket: item.status === "upcoming" ? 0 : 1,
     sortAt,
-    isFinal: item.status === "resolved" || item.status === "historical",
+    // Only upcoming and active items can change through the passage of time alone.
+    isFinal: item.status !== "upcoming" && item.status !== "active",
     sourceUpdatedAt: isoOf(sourceUpdatedMs) ?? new Date(0).toISOString()
   };
 }
@@ -160,12 +161,111 @@ async function loadProjectionInputs(db: D1Database, ids: number[]): Promise<{
   return { rows, facts };
 }
 
+const WATERMARK_KEY = "projection:watermark";
+/** Overlap between runs so a write committed during the previous run is never missed. */
+const WATERMARK_SKEW_MS = 2 * 60 * 1000;
+
+interface Watermark {
+  /** "YYYY-MM-DD HH:MM:SS" — the format of outage_events.updated_at (CURRENT_TIMESTAMP). */
+  db: string;
+  /** ISO — the format of decided_at and event_public_locations.resolved_at. */
+  iso: string;
+}
+
+async function readWatermark(db: D1Database): Promise<Watermark | null> {
+  const row = await db.prepare("SELECT payload_json FROM public_stats_cache WHERE cache_key = ?").bind(WATERMARK_KEY)
+    .first<{ payload_json: string }>();
+  if (!row) return null;
+  try {
+    const parsed = JSON.parse(row.payload_json) as Watermark;
+    return parsed.db && parsed.iso ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeWatermark(db: D1Database, ms: number): Promise<void> {
+  const iso = new Date(ms).toISOString();
+  const value: Watermark = { db: iso.replace("T", " ").slice(0, 19), iso };
+  await db.prepare(
+    `INSERT INTO public_stats_cache (cache_key, payload_json, computed_at) VALUES (?, ?, ?)
+     ON CONFLICT(cache_key) DO UPDATE SET payload_json = excluded.payload_json, computed_at = excluded.computed_at`
+  ).bind(WATERMARK_KEY, JSON.stringify(value), iso).run();
+}
+
+/**
+ * Indexed candidate lookup: everything touched since the watermark (event row,
+ * publication decision, map pin) plus the few rows whose state depends on the
+ * clock. Changed rows come first so time-dependent rows can never starve them.
+ */
+async function changedCandidates(db: D1Database, watermark: Watermark, limit: number): Promise<number[]> {
+  const result = await db.prepare(
+    `SELECT id, MIN(priority) AS priority FROM (
+       SELECT id, 0 AS priority FROM outage_events WHERE updated_at > ?
+       UNION ALL SELECT outage_event_id, 0 FROM publication_decisions WHERE decided_at > ?
+       UNION ALL SELECT outage_event_id, 0 FROM event_public_locations WHERE resolved_at > ?
+       UNION ALL SELECT event_id, 1 FROM public_events WHERE is_final = 0
+     )
+     GROUP BY id
+     ORDER BY priority ASC, id DESC
+     LIMIT ?`
+  ).bind(watermark.db, watermark.iso, watermark.iso, limit).all<{ id: number }>();
+  return result.results.map((row) => row.id);
+}
+
+async function allPublishedBefore(db: D1Database, beforeId: number, limit: number): Promise<number[]> {
+  const result = await db.prepare(
+    `SELECT outage_event_id AS id FROM publication_decisions
+     WHERE outage_event_id < ? ORDER BY outage_event_id DESC LIMIT ?`
+  ).bind(beforeId, limit).all<{ id: number }>();
+  return result.results.map((row) => row.id);
+}
+
+/** First run / rebuild only: every published event without an up-to-date projection. */
+async function fullScanCandidates(db: D1Database, limit: number): Promise<number[]> {
+  const result = await db.prepare(
+    `SELECT event.id AS id
+     FROM outage_events event
+     INNER JOIN publication_decisions decision ON decision.outage_event_id = event.id
+     LEFT JOIN public_events p ON p.event_id = event.id
+     LEFT JOIN event_public_locations loc ON loc.outage_event_id = event.id
+     WHERE decision.publishable = 1 AND event.status != 'dismissed' AND event.country = 'CH'
+       AND (
+         p.event_id IS NULL
+         OR p.is_final = 0
+         OR julianday(event.updated_at) > julianday(p.source_updated_at)
+         OR julianday(decision.decided_at) > julianday(p.source_updated_at)
+         OR (loc.resolved_at IS NOT NULL AND julianday(loc.resolved_at) > julianday(p.source_updated_at))
+       )
+     ORDER BY (p.event_id IS NULL) DESC, event.id DESC
+     LIMIT ?`
+  ).bind(limit).all<{ id: number }>();
+  return result.results.map((row) => row.id);
+}
+
+/**
+ * What counts as a change worth a D1 write. "Last confirmed" moves on every
+ * poll while an outage is listed; it is only written again once it advanced
+ * by an hour, everything else is written as soon as it changes.
+ */
+export function stableItemKey(itemJson: string): string {
+  try {
+    const item = JSON.parse(itemJson) as PublicFeedItem;
+    const confirmed = item.last_confirmed_active_at ? Math.floor(new Date(item.last_confirmed_active_at).getTime() / 3_600_000) : null;
+    return JSON.stringify({ ...item, updated_at: null, last_confirmed_active_at: confirmed });
+  } catch {
+    return itemJson;
+  }
+}
+
 export interface ProjectionRefreshResult {
   candidates: number;
   written: number;
   removed: number;
   locationsResolved: number;
   errors: string[];
+  /** Cursor for the next page of a full rebuild, null when done. */
+  nextBeforeId: number | null;
 }
 
 /**
@@ -175,43 +275,55 @@ export interface ProjectionRefreshResult {
  */
 export async function refreshPublicProjection(
   env: Pick<Env, "DB">,
-  options: { limit?: number; eventIds?: number[]; now?: number; resolveLocations?: number; sweepOrphans?: boolean } = {}
+  options: {
+    limit?: number;
+    eventIds?: number[];
+    now?: number;
+    resolveLocations?: number;
+    sweepOrphans?: boolean;
+    /** Re-project every published event with an id below this cursor (paged full rebuild). */
+    fullBeforeId?: number;
+  } = {}
 ): Promise<ProjectionRefreshResult> {
   const db = env.DB;
   const now = options.now ?? Date.now();
   const limit = Math.max(1, Math.min(1000, Math.floor(options.limit ?? 400)));
-  const result: ProjectionRefreshResult = { candidates: 0, written: 0, removed: 0, locationsResolved: 0, errors: [] };
+  const result: ProjectionRefreshResult = { candidates: 0, written: 0, removed: 0, locationsResolved: 0, errors: [], nextBeforeId: null };
+  const targeted = Boolean(options.eventIds?.length) || options.fullBeforeId !== undefined;
 
+  const watermark = targeted ? null : await readWatermark(db);
+  const startedAt = now;
   const ids = options.eventIds?.length
     ? [...new Set(options.eventIds)].slice(0, limit)
-    : (await db.prepare(
-      `SELECT event.id AS id
-       FROM outage_events event
-       INNER JOIN publication_decisions decision ON decision.outage_event_id = event.id
-       LEFT JOIN public_events p ON p.event_id = event.id
-       LEFT JOIN event_public_locations loc ON loc.outage_event_id = event.id
-       WHERE decision.publishable = 1 AND event.status != 'dismissed' AND event.country = 'CH'
-         AND (
-           p.event_id IS NULL
-           OR p.is_final = 0
-           OR julianday(event.updated_at) > julianday(p.source_updated_at)
-           OR julianday(decision.decided_at) > julianday(p.source_updated_at)
-           OR (loc.resolved_at IS NOT NULL AND julianday(loc.resolved_at) > julianday(p.source_updated_at))
-         )
-       ORDER BY (p.event_id IS NULL) DESC, event.id DESC
-       LIMIT ?`
-    ).bind(limit).all<{ id: number }>()).results.map((row) => row.id);
+    : options.fullBeforeId !== undefined
+      ? await allPublishedBefore(db, options.fullBeforeId, limit)
+      : watermark
+      ? await changedCandidates(db, watermark, limit)
+      : await fullScanCandidates(db, limit);
   result.candidates = ids.length;
+  if (options.fullBeforeId !== undefined && ids.length === limit) result.nextBeforeId = Math.min(...ids);
 
   if (ids.length) {
     const { rows, facts } = await loadProjectionInputs(db, ids);
 
     // Resolve a few missing map pins per run. Until now pins were only resolved
-    // when someone (usually a crawler) opened the detail page.
+    // when someone (usually a crawler) opened the detail page. Rows whose last
+    // lookup failed recently are skipped so they cannot block newer events.
     let budget = Math.max(0, options.resolveLocations ?? 0);
-    for (const row of rows) {
+    const pinless = rows.filter((row) => typeof row.map_latitude !== "number").sort((a, b) => b.id - a.id);
+    const recentMisses = new Set<number>();
+    if (budget > 0 && pinless.length) {
+      for (const part of chunks(pinless.map((row) => row.id), IN_CHUNK)) {
+        const found = await db.prepare(
+          `SELECT outage_event_id FROM event_public_location_misses
+           WHERE outage_event_id IN (${part.map(() => "?").join(", ")}) AND retry_after > ?`
+        ).bind(...part, new Date(now).toISOString()).all<{ outage_event_id: number }>();
+        for (const miss of found.results) recentMisses.add(miss.outage_event_id);
+      }
+    }
+    for (const row of pinless) {
       if (budget <= 0) break;
-      if (typeof row.map_latitude === "number") continue;
+      if (recentMisses.has(row.id)) continue;
       budget -= 1;
       try {
         const location = await resolvePublicEventLocation(db, row);
@@ -250,11 +362,10 @@ export async function refreshPublicProjection(
       const previous = existing.get(row.id);
       if (
         previous &&
-        previous.item_json === itemJson &&
         previous.places_key === key &&
-        previous.source_updated_at === projection.sourceUpdatedAt &&
         previous.sort_bucket === projection.sortBucket &&
-        previous.is_final === Number(projection.isFinal)
+        previous.is_final === Number(projection.isFinal) &&
+        stableItemKey(previous.item_json) === stableItemKey(itemJson)
       ) continue;
       const item = projection.item;
       statements.push(db.prepare(
@@ -305,6 +416,12 @@ export async function refreshPublicProjection(
     for (const part of chunks(statements, BATCH_CHUNK)) await db.batch(part);
   }
 
+  // Advance the watermark only when this run saw every changed candidate;
+  // a truncated run is simply continued by the next one.
+  if (!targeted && ids.length < limit) {
+    await writeWatermark(db, startedAt - WATERMARK_SKEW_MS);
+  }
+
   // Events that left the public set entirely (dismissed, merged, gate failed).
   // Targeted refreshes already remove their own ids above; the full sweep only
   // runs when asked (hourly from the cron) to keep D1 reads low.
@@ -336,36 +453,108 @@ function parseItem(json: string): PublicFeedItem | null {
   }
 }
 
+/**
+ * Feed cursor. "u|<sort_at>|<id>" continues inside the upcoming bucket
+ * (ascending); the legacy "<sort_at>|<id>" form continues in the past bucket.
+ */
+export function encodeFeedCursor(bucket: 0 | 1, sortAt: string, id: number): string {
+  return bucket === 0 ? `u|${sortAt}|${id}` : publicFeedCursor({ id, received_at: sortAt });
+}
+
+export function decodeFeedCursor(value: string | null | undefined): { bucket: 0 | 1; sortAt: string; id: number } | null {
+  if (!value) return null;
+  if (value.startsWith("u|")) {
+    const parsed = parsePublicFeedCursor(value.slice(2));
+    return parsed ? { bucket: 0, sortAt: parsed.receivedAt, id: parsed.id } : null;
+  }
+  const parsed = parsePublicFeedCursor(value);
+  return parsed ? { bucket: 1, sortAt: parsed.receivedAt, id: parsed.id } : null;
+}
+
+interface BucketFilter {
+  from: string;
+  where: string[];
+  binds: unknown[];
+}
+
+function bucketFilter(input: { operatorSlug?: string; placeSlug?: string; canton?: string; excludeId?: number }): BucketFilter {
+  const filter: BucketFilter = { from: "public_events p", where: [], binds: [] };
+  if (input.placeSlug) {
+    filter.from = "public_event_places pl INNER JOIN public_events p ON p.event_id = pl.event_id";
+    filter.where.push("pl.place_slug = ?");
+    filter.binds.push(input.placeSlug);
+  }
+  if (input.operatorSlug) {
+    filter.where.push("p.operator_slug = ?");
+    filter.binds.push(input.operatorSlug);
+  }
+  if (input.canton) {
+    filter.where.push("p.canton = ?");
+    filter.binds.push(input.canton);
+  }
+  if (input.excludeId) {
+    filter.where.push("p.event_id != ?");
+    filter.binds.push(input.excludeId);
+  }
+  return filter;
+}
+
+/**
+ * Reads one bucket in index order: upcoming ascending by start, everything
+ * else newest first. Two small indexed queries instead of one ORDER BY that
+ * forces a full scan and sort.
+ */
+async function readBucket(
+  db: D1Database,
+  bucket: 0 | 1,
+  filter: BucketFilter,
+  limit: number,
+  after?: { sortAt: string; id: number }
+): Promise<Array<{ event_id: number; sort_at: string; item_json: string }>> {
+  if (limit <= 0) return [];
+  const where = [...filter.where, "p.sort_bucket = ?"];
+  const binds = [...filter.binds, bucket];
+  if (after) {
+    where.push(bucket === 0
+      ? "(p.sort_at > ? OR (p.sort_at = ? AND p.event_id > ?))"
+      : "(p.sort_at < ? OR (p.sort_at = ? AND p.event_id < ?))");
+    binds.push(after.sortAt, after.sortAt, after.id);
+  }
+  const order = bucket === 0 ? "p.sort_at ASC, p.event_id ASC" : "p.sort_at DESC, p.event_id DESC";
+  const result = await db.prepare(
+    `SELECT p.event_id, p.sort_at, p.item_json FROM ${filter.from}
+     WHERE ${where.join(" AND ")}
+     ORDER BY ${order}
+     LIMIT ?`
+  ).bind(...binds, limit).all<{ event_id: number; sort_at: string; item_json: string }>();
+  return result.results;
+}
+
 export async function listPublicFeed(
   db: D1Database,
   input: { limit?: number; before?: string | null } = {}
 ): Promise<{ items: PublicFeedItem[]; next_cursor: string | null }> {
   const requested = Number(input.limit ?? 10);
   const limit = Math.max(1, Math.min(40, Math.floor(Number.isFinite(requested) ? requested : 10)));
-  const cursor = parsePublicFeedCursor(input.before);
-  const result = await db.prepare(
-    `SELECT event_id, sort_at, item_json FROM public_events
-     WHERE (? IS NULL)
-        OR (sort_bucket = 1 AND (sort_at < ? OR (sort_at = ? AND event_id < ?)))
-     ORDER BY sort_bucket ASC,
-       CASE WHEN sort_bucket = 0 THEN sort_at END ASC,
-       sort_at DESC, event_id DESC
-     LIMIT ?`
-  ).bind(
-    cursor?.receivedAt ?? null,
-    cursor?.receivedAt ?? null,
-    cursor?.receivedAt ?? null,
-    cursor?.id ?? null,
-    limit
-  ).all<{ event_id: number; sort_at: string; item_json: string }>();
-  const rows = result.results.flatMap((row) => {
+  const cursor = decodeFeedCursor(input.before);
+  const filter = bucketFilter({});
+  const rows: Array<{ bucket: 0 | 1; event_id: number; sort_at: string; item_json: string }> = [];
+  if (!cursor || cursor.bucket === 0) {
+    const upcoming = await readBucket(db, 0, filter, limit, cursor ?? undefined);
+    rows.push(...upcoming.map((row) => ({ ...row, bucket: 0 as const })));
+  }
+  if (rows.length < limit) {
+    const past = await readBucket(db, 1, filter, limit - rows.length, cursor?.bucket === 1 ? cursor : undefined);
+    rows.push(...past.map((row) => ({ ...row, bucket: 1 as const })));
+  }
+  const items = rows.flatMap((row) => {
     const item = parseItem(row.item_json);
-    return item ? [{ item, sortAt: row.sort_at }] : [];
+    return item ? [item] : [];
   });
   const last = rows.at(-1);
   return {
-    items: rows.map((row) => row.item),
-    next_cursor: rows.length === limit && last ? publicFeedCursor({ id: last.item.id, received_at: last.sortAt }) : null
+    items,
+    next_cursor: rows.length === limit && last ? encodeFeedCursor(last.bucket, last.sort_at, last.event_id) : null
   };
 }
 
@@ -379,51 +568,28 @@ export async function listPublicItems(
   input: { limit?: number; operatorSlug?: string; placeSlug?: string; canton?: string; excludeId?: number } = {}
 ): Promise<PublicFeedItem[]> {
   const limit = Math.max(1, Math.min(2000, Math.floor(input.limit ?? 50)));
-  const where: string[] = [];
-  const binds: unknown[] = [];
-  let from = "public_events p";
-  if (input.placeSlug) {
-    from = "public_event_places pl INNER JOIN public_events p ON p.event_id = pl.event_id";
-    where.push("pl.place_slug = ?");
-    binds.push(input.placeSlug);
-  }
-  if (input.operatorSlug) {
-    where.push("p.operator_slug = ?");
-    binds.push(input.operatorSlug);
-  }
-  if (input.canton) {
-    where.push("p.canton = ?");
-    binds.push(input.canton);
-  }
-  if (input.excludeId) {
-    where.push("p.event_id != ?");
-    binds.push(input.excludeId);
-  }
-  const result = await db.prepare(
-    `SELECT p.item_json FROM ${from}
-     ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
-     ORDER BY p.sort_bucket ASC, CASE WHEN p.sort_bucket = 0 THEN p.sort_at END ASC, p.sort_at DESC, p.event_id DESC
-     LIMIT ?`
-  ).bind(...binds, limit).all<{ item_json: string }>();
-  return result.results.flatMap((row) => {
+  const filter = bucketFilter(input);
+  const upcoming = await readBucket(db, 0, filter, limit);
+  const past = await readBucket(db, 1, filter, limit - upcoming.length);
+  return [...upcoming, ...past].flatMap((row) => {
     const item = parseItem(row.item_json);
     return item ? [item] : [];
   });
 }
 
 /**
- * Column-only variant for whole-set pages (operator hub, sitemap, index):
- * avoids parsing hundreds of item_json blobs within the 10 ms CPU budget.
- * Only the fields listed here are populated.
+ * Column-only variant for whole-set pages (sitemap, aggregates): avoids
+ * parsing hundreds of item_json blobs within the 10 ms CPU budget.
+ * Only the fields listed in LiteRow are populated.
  */
-export async function listPublicItemsLite(db: D1Database, limit = 3000): Promise<PublicFeedItem[]> {
-  const capped = Math.max(1, Math.min(5000, Math.floor(limit)));
+export async function listPublicItemsLite(db: D1Database, limit = 10000): Promise<PublicFeedItem[]> {
+  const capped = Math.max(1, Math.min(20000, Math.floor(limit)));
   const result = await db.prepare(
     `SELECT event_id, status, nature, trust, location, canton, operator_slug, publisher,
             received_at, started_at, resolved_at, expected_restore_at, duration_minutes,
             sort_bucket, sort_at, latitude, longitude, places_key, source_updated_at
      FROM public_events
-     ORDER BY sort_bucket ASC, CASE WHEN sort_bucket = 0 THEN sort_at END ASC, sort_at DESC, event_id DESC
+     ORDER BY sort_at DESC, event_id DESC
      LIMIT ?`
   ).bind(capped).all<LiteRow>();
   return result.results.map(liteRowToItem);
@@ -594,6 +760,13 @@ export async function getPublicPlace(db: D1Database, slug: string): Promise<Publ
 }
 
 // ------------------------------------------------------- cached aggregates
+
+/** The stored JSON text as is, for embedding into HTML without a parse/serialize round trip. */
+export async function readStatsCacheRaw(db: D1Database, key: string): Promise<string | null> {
+  const row = await db.prepare("SELECT payload_json FROM public_stats_cache WHERE cache_key = ?")
+    .bind(key).first<{ payload_json: string }>();
+  return row?.payload_json ?? null;
+}
 
 export async function readStatsCache<T>(db: D1Database, key: string): Promise<{ payload: T; computedAt: string } | null> {
   const row = await db.prepare("SELECT payload_json, computed_at FROM public_stats_cache WHERE cache_key = ?")

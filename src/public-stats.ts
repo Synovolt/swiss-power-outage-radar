@@ -19,6 +19,9 @@ export const INDEX_CACHE_KEY = "index:v1";
 export const STATS_CACHE_KEY = "stats:v1";
 export const OPERATOR_STATS_CACHE_KEY = "operators:v1";
 export const PLACES_CACHE_KEY = "places:v1";
+/** Small "now" subset embedded into the home page (the full index is fetched lazily). */
+export const HOME_INDEX_CACHE_KEY = "index-home:v1";
+const HOME_RECENT_MS = 72 * 60 * 60 * 1000;
 
 export interface PlacesPayload {
   v: 1;
@@ -67,6 +70,34 @@ export interface PublicIndexPayload {
   generatedAt: string;
   fields: typeof INDEX_FIELDS;
   items: IndexEntry[];
+  /** Only on the home subset: view counts over the full index at build time. */
+  partial?: boolean;
+  counts?: { now: number; planned: number; history: number };
+}
+
+/** Upcoming, active and recently ended events: everything the "now" view can show. */
+export function buildHomeIndex(full: PublicIndexPayload, now = Date.now()): PublicIndexPayload {
+  const items = full.items.filter((entry) => {
+    const status = entry[3];
+    if (status === "upcoming" || status === "active") return true;
+    const endMin = entry[9] ?? entry[11];
+    return now - endMin * 60000 <= HOME_RECENT_MS;
+  });
+  const counts = { now: 0, planned: 0, history: 0 };
+  for (const entry of full.items) {
+    const status = entry[3];
+    if (status === "upcoming") counts.planned += 1;
+    else counts.history += 1;
+  }
+  for (const entry of items) {
+    const status = entry[3];
+    const startMs = (entry[8] ?? entry[11]) * 60000;
+    const endMs = (entry[9] ?? entry[11]) * 60000;
+    if (status === "active") counts.now += 1;
+    else if (status === "upcoming") { if (startMs - now <= 7 * 24 * 60 * 60 * 1000) counts.now += 1; }
+    else if (now - endMs <= 48 * 60 * 60 * 1000 && endMs <= now + 60000) counts.now += 1;
+  }
+  return { ...full, items, partial: true, counts };
 }
 
 function minutes(value: string | null | undefined): number | null {
@@ -374,10 +405,15 @@ export async function loadAggregateRows(db: D1Database): Promise<AggregateRow[]>
   return (await db.prepare(AGGREGATE_SQL).all<AggregateRow>()).results;
 }
 
+/** Statistics older than this are recomputed even in a run that also rebuilt the index. */
+const STATS_HARD_MAX_AGE_MS = 3 * 60 * 60 * 1000;
+
 /**
- * Refreshes the cached aggregates. The index follows every projection change;
- * statistics and operator figures are recomputed at most hourly (or when
- * forced) because their time windows move slowly.
+ * Refreshes the cached aggregates. The index, home subset and places follow
+ * every projection change. Statistics and operator figures move slowly: they
+ * are recomputed at most hourly and preferably in a run that did not already
+ * rebuild the index, so one cron invocation never does both CPU-heavy steps
+ * (unless the statistics are more than three hours old or a rebuild forces it).
  */
 export async function refreshPublicAggregates(
   env: Pick<Env, "DB">,
@@ -385,16 +421,25 @@ export async function refreshPublicAggregates(
 ): Promise<{ index: boolean; stats: boolean }> {
   const now = options.now ?? Date.now();
   const cachedStats = options.force ? null : await readStatsCache<StatsPayload>(env.DB, STATS_CACHE_KEY);
-  const statsDue = options.force || !cachedStats || now - dbTimeMs(cachedStats.computedAt) >= STATS_MAX_AGE_MS;
-  if (!options.projectionChanged && !statsDue) return { index: false, stats: false };
+  const statsAge = cachedStats ? now - dbTimeMs(cachedStats.computedAt) : Infinity;
+  const statsDue = Boolean(options.force) || statsAge >= STATS_MAX_AGE_MS;
+  const runStats = statsDue && (Boolean(options.force) || !options.projectionChanged || statsAge >= STATS_HARD_MAX_AGE_MS);
+  const runIndex = options.projectionChanged || Boolean(options.force);
+  if (!runIndex && !runStats) return { index: false, stats: false };
 
   const rows = await loadAggregateRows(env.DB);
   const generatedAt = new Date(now).toISOString();
-  await writeStatsCache(env.DB, INDEX_CACHE_KEY, buildPublicIndex(rows, now), generatedAt);
-  const places = await loadPlaces(env.DB, generatedAt);
-  await writeStatsCache(env.DB, PLACES_CACHE_KEY, places, generatedAt);
-  if (!statsDue) return { index: true, stats: false };
+  let places: PlacesPayload | null = null;
+  if (runIndex) {
+    const index = buildPublicIndex(rows, now);
+    await writeStatsCache(env.DB, INDEX_CACHE_KEY, index, generatedAt);
+    await writeStatsCache(env.DB, HOME_INDEX_CACHE_KEY, buildHomeIndex(index, now), generatedAt);
+    places = await loadPlaces(env.DB, generatedAt);
+    await writeStatsCache(env.DB, PLACES_CACHE_KEY, places, generatedAt);
+  }
+  if (!runStats) return { index: runIndex, stats: false };
 
+  places ??= (await readStatsCache<PlacesPayload>(env.DB, PLACES_CACHE_KEY))?.payload ?? await loadPlaces(env.DB, generatedAt);
   const sources = await env.DB.prepare(
     `SELECT COUNT(*) AS monitored, SUM(health_status = 'healthy') AS healthy
      FROM source_registry WHERE enabled = 1`
@@ -408,14 +453,16 @@ export async function refreshPublicAggregates(
   const byOperator = new Map<string, PublicFeedItem[]>();
   for (const row of rows) {
     if (!row.operator_slug) continue;
-    byOperator.set(row.operator_slug, [...(byOperator.get(row.operator_slug) ?? []), liteRowToItem(row)]);
+    const list = byOperator.get(row.operator_slug);
+    if (list) list.push(liteRowToItem(row));
+    else byOperator.set(row.operator_slug, [liteRowToItem(row)]);
   }
   const operatorStats: Record<string, OperatorLiveStats> = {};
   for (const profile of publicOperatorProfiles()) {
     operatorStats[profile.slug] = summarizeOperatorEvents(byOperator.get(profile.slug) ?? [], now);
   }
   await writeStatsCache(env.DB, OPERATOR_STATS_CACHE_KEY, operatorStats, generatedAt);
-  return { index: true, stats: true };
+  return { index: runIndex, stats: true };
 }
 
 async function loadPlaces(db: D1Database, generatedAt: string): Promise<PlacesPayload> {

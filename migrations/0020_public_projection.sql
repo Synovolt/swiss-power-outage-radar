@@ -43,11 +43,13 @@ CREATE TABLE IF NOT EXISTS public_events (
 CREATE INDEX IF NOT EXISTS idx_public_events_feed
 ON public_events(sort_bucket, sort_at DESC, event_id DESC);
 
+-- Lists are always read per bucket (upcoming ascending, past descending) so
+-- that every public query can walk an index instead of scanning and sorting.
 CREATE INDEX IF NOT EXISTS idx_public_events_operator
-ON public_events(operator_slug, sort_at DESC);
+ON public_events(operator_slug, sort_bucket, sort_at DESC, event_id DESC);
 
 CREATE INDEX IF NOT EXISTS idx_public_events_canton
-ON public_events(canton, sort_at DESC);
+ON public_events(canton, sort_bucket, sort_at DESC, event_id DESC);
 
 CREATE INDEX IF NOT EXISTS idx_public_events_final
 ON public_events(is_final);
@@ -96,3 +98,14 @@ WHERE status = 'resolved'
 
 CREATE INDEX IF NOT EXISTS idx_public_event_places_canton
 ON public_event_places(canton, place_slug);
+
+-- Incremental projection refresh: candidates are found through these indexes
+-- (changed since the last watermark) instead of scanning every event per run.
+CREATE INDEX IF NOT EXISTS idx_outage_events_updated_at
+ON outage_events(updated_at);
+
+CREATE INDEX IF NOT EXISTS idx_publication_decisions_decided_at
+ON publication_decisions(decided_at);
+
+CREATE INDEX IF NOT EXISTS idx_event_public_locations_resolved_at
+ON event_public_locations(resolved_at);

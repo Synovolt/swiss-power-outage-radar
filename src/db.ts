@@ -971,8 +971,10 @@ export async function recordEventSourcePresence(
          status = CASE WHEN status = 'resolved' AND time_confidence = 'inferred' THEN 'corroborated' ELSE status END,
          resolution_earliest_at = CASE WHEN time_confidence = 'inferred' THEN NULL ELSE resolution_earliest_at END,
          resolution_latest_at = CASE WHEN time_confidence = 'inferred' THEN NULL ELSE resolution_latest_at END,
-         time_confidence = CASE WHEN time_confidence = 'inferred' THEN 'reported' ELSE time_confidence END,
-         updated_at = CURRENT_TIMESTAMP
+         -- A routine "still listed" confirmation is not a change of the event:
+         -- bump updated_at only when the state flips back from an inferred close.
+         updated_at = CASE WHEN time_confidence = 'inferred' THEN CURRENT_TIMESTAMP ELSE updated_at END,
+         time_confidence = CASE WHEN time_confidence = 'inferred' THEN 'reported' ELSE time_confidence END
      WHERE id = ?`
   ).bind(observedAt, observedAt, eventId).run();
 }
@@ -983,15 +985,18 @@ export async function reconcileSourcePresence(
   checkedAt: string,
   presentEventIds: number[]
 ): Promise<void> {
-  const placeholders = presentEventIds.map(() => "?").join(", ");
-  const exclusion = presentEventIds.length ? `AND outage_event_id NOT IN (${placeholders})` : "";
+  // The present ids travel as one JSON parameter (D1 allows only 100 bound
+  // parameters), and rows stop counting once they reached the closing
+  // threshold of 2, so long-gone events are not rewritten on every run.
   await db.prepare(
     `UPDATE outage_event_source_presence
      SET first_missing_at = COALESCE(first_missing_at, ?),
          consecutive_missing_checks = consecutive_missing_checks + 1,
          updated_at = CURRENT_TIMESTAMP
-     WHERE source_registry_id = ? ${exclusion}`
-  ).bind(checkedAt, sourceRegistryId, ...presentEventIds).run();
+     WHERE source_registry_id = ?
+       AND consecutive_missing_checks < 2
+       AND outage_event_id NOT IN (SELECT value FROM json_each(?))`
+  ).bind(checkedAt, sourceRegistryId, JSON.stringify(presentEventIds)).run();
 
   // The end of an auto-closed outage is bracketed by the polling cadence: it was
   // still listed at the last confirmation and gone at the first missing check.

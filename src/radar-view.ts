@@ -57,7 +57,7 @@ export const HISTORY_PAGE = 60;
 const minuteMs = (value: number | null) => (typeof value === "number" ? value * 60000 : null);
 
 function fold(value: string): string {
-  return value.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  return value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 }
 
 const CANTON_WORDS = new Map(SWISS_CANTONS.map((canton) => [
@@ -173,7 +173,20 @@ export function sortForView(items: RadarItem[], view: RadarView): RadarItem[] {
   });
 }
 
-const dayKey = (ms: number) => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Zurich", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(ms));
+// Intl formatters are expensive to construct; build each locale/option pair once.
+const formatterCache = new Map<string, Intl.DateTimeFormat>();
+function dateFormat(locale: string, options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const key = `${locale}|${JSON.stringify(options)}`;
+  let formatter = formatterCache.get(key);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat(locale, { timeZone: "Europe/Zurich", ...options });
+    formatterCache.set(key, formatter);
+  }
+  return formatter;
+}
+const relativeCache = new Map<string, Intl.RelativeTimeFormat>();
+
+const dayKey = (ms: number) => dateFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(ms));
 
 export interface RadarGroup {
   key: string;
@@ -195,7 +208,7 @@ export function groupItems(items: RadarItem[], view: RadarView, now: number, cop
     const key = dayKey(ms);
     if (key === today) return copy.groups.today;
     if (key === tomorrow) return copy.groups.tomorrow;
-    return new Intl.DateTimeFormat(copy.dateLocale, { timeZone: "Europe/Zurich", weekday: "long", day: "numeric", month: "long" }).format(new Date(ms));
+    return dateFormat(copy.dateLocale, { weekday: "long", day: "numeric", month: "long" }).format(new Date(ms));
   };
   for (const item of items) {
     if (view === "now") {
@@ -206,7 +219,7 @@ export function groupItems(items: RadarItem[], view: RadarView, now: number, cop
       const start = item.startMs ?? item.sortMs;
       push(dayKey(start), dayLabel(start), item);
     } else {
-      const label = new Intl.DateTimeFormat(copy.dateLocale, { timeZone: "Europe/Zurich", month: "long", year: "numeric" }).format(new Date(item.sortMs));
+      const label = dateFormat(copy.dateLocale, { month: "long", year: "numeric" }).format(new Date(item.sortMs));
       push(dayKey(item.sortMs).slice(0, 7), label, item);
     }
   }
@@ -222,13 +235,12 @@ export function escapeHtml(value: unknown): string {
 }
 
 function formatTime(ms: number, copy: RadarCopy): string {
-  return new Intl.DateTimeFormat(copy.dateLocale, { timeZone: "Europe/Zurich", hour: "2-digit", minute: "2-digit" }).format(new Date(ms));
+  return dateFormat(copy.dateLocale, { hour: "2-digit", minute: "2-digit" }).format(new Date(ms));
 }
 
 function formatDay(ms: number, copy: RadarCopy, now: number): string {
   const sameYear = new Date(ms).getUTCFullYear() === new Date(now).getUTCFullYear();
-  return new Intl.DateTimeFormat(copy.dateLocale, {
-    timeZone: "Europe/Zurich",
+  return dateFormat(copy.dateLocale, {
     weekday: "short",
     day: "numeric",
     month: "short",
@@ -247,7 +259,11 @@ export function formatDuration(minutes: number): string {
 export function relativeTime(ms: number, now: number, copy: RadarCopy): string {
   const diff = ms - now;
   const abs = Math.abs(diff);
-  const rtf = new Intl.RelativeTimeFormat(copy.dateLocale, { numeric: "auto", style: "short" });
+  let rtf = relativeCache.get(copy.dateLocale);
+  if (!rtf) {
+    rtf = new Intl.RelativeTimeFormat(copy.dateLocale, { numeric: "auto", style: "short" });
+    relativeCache.set(copy.dateLocale, rtf);
+  }
   if (abs < 60 * 60000) return rtf.format(Math.round(diff / 60000), "minute");
   if (abs < DAY_MS) return rtf.format(Math.round(diff / 3_600_000), "hour");
   return rtf.format(Math.round(diff / DAY_MS), "day");

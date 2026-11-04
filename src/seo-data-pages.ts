@@ -4,7 +4,7 @@
  * (see src/public-projection.ts, src/public-stats.ts) and are injected into the
  * static /data-template/ shell with HTMLRewriter.
  */
-import { escapeHtml, inlineJson, setMetaContent } from "./html";
+import { escapeHtml, fetchTemplate, inlineJson, renderedHeaders, setMetaContent } from "./html";
 import {
   DATE_LOCALE,
   alternatePath,
@@ -466,7 +466,7 @@ export async function renderDataPage(
   cacheControl: string
 ): Promise<Response> {
   const templateUrl = new URL(pathFor({ kind: "dataTemplate" }, page.locale), request.url);
-  const asset = await env.ASSETS.fetch(new Request(templateUrl, request));
+  const asset = await fetchTemplate(env.ASSETS, templateUrl);
   const path = pathFor(page.route, page.locale);
   const canonical = absoluteUrl(path, SITE_ORIGIN);
   const indexable = !page.robots.includes("noindex");
@@ -503,6 +503,6 @@ export async function renderDataPage(
     .on("#data-shell", { element(element) { element.setInnerContent(page.html, { html: true }); element.setAttribute("aria-busy", "false"); } })
     .transform(new Response(asset.body, {
       status: asset.status,
-      headers: { ...Object.fromEntries(asset.headers), "Cache-Control": cacheControl }
+      headers: renderedHeaders(asset, cacheControl)
     }));
 }

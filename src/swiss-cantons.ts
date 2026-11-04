@@ -45,7 +45,7 @@ const BY_CODE = new Map(SWISS_CANTONS.map((canton) => [canton.code, canton]));
 function fold(value: string): string {
   return value
     .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .trim();

@@ -10,7 +10,7 @@ import {
 } from "./public-url";
 import { renderOperatorStatsGrid } from "./seo-operator-page";
 import { organizationId, websiteId } from "./seo-site";
-import { escapeHtml, setMetaContent } from "./html";
+import { escapeHtml, fetchTemplate, renderedHeaders, setMetaContent } from "./html";
 import { cantonByCode, cantonInText, cantonSlug } from "./swiss-cantons";
 import {
   DATE_LOCALE,
@@ -559,7 +559,7 @@ export async function renderSeoEventAsset(
 ): Promise<Response> {
   const locale = parseLocaleFromPath(new URL(request.url).pathname);
   const assetUrl = new URL(pathFor({ kind: "eventsTemplate" }, locale), request.url);
-  const asset = await env.ASSETS.fetch(new Request(assetUrl, request));
+  const asset = await fetchTemplate(env.ASSETS, assetUrl);
   const seo = eventSeo(detail, SITE_ORIGIN, locale);
   const data = JSON.stringify(detail).replace(/</g, "\\u003c");
   const hreflangTags = eventHreflangLinkTags(detail.item.url, SITE_ORIGIN);
@@ -587,5 +587,5 @@ export async function renderSeoEventAsset(
       element.append(`${hreflangTags}<script type="application/ld+json">${seo.jsonLd}</script><script id="outage-event-data" type="application/json">${data}</script>`, { html: true });
     } })
     .on("#event-shell", { element(element) { element.setInnerContent(renderEventSeoMarkup(detail, related, live, locale), { html: true }); element.setAttribute("aria-busy", "false"); } })
-    .transform(new Response(asset.body, { status: asset.status, headers: { ...Object.fromEntries(asset.headers), "Cache-Control": "public,max-age=60,s-maxage=300,stale-while-revalidate=1800" } }));
+    .transform(new Response(asset.body, { status: asset.status, headers: renderedHeaders(asset, "public,max-age=60,s-maxage=300,stale-while-revalidate=1800") }));
 }

@@ -19,7 +19,7 @@ import { applyPublicationGate, ingestFirecrawlWebhook, revalidatePublicEvents, r
 import { loadPublicEventDetail } from "./public-detail";
 import { SITE_ORIGIN, httpsRedirect, siteOriginFromRequest } from "./public-url";
 import { evidenceScreenshotKey } from "./snapshots";
-import { operatorBySlug, resolveOperatorProfile } from "./operators";
+import { operatorBySlug, resolveOperatorProfile, type OperatorLiveStats } from "./operators";
 import { renderSeoEventAsset } from "./seo-event-page";
 import { renderHomeSeoAsset } from "./seo-home";
 import {
@@ -63,11 +63,15 @@ import {
   listPublicItems,
   listPublicItemsLite,
   readStatsCache,
+  readStatsCacheRaw,
   refreshPublicProjection,
   summarizePublicSlice
 } from "./public-projection";
 import {
+  HOME_INDEX_CACHE_KEY,
   INDEX_CACHE_KEY,
+  OPERATOR_STATS_CACHE_KEY,
+  buildHomeIndex,
   PLACES_CACHE_KEY,
   STATS_CACHE_KEY,
   buildPublicIndex,
@@ -250,7 +254,18 @@ export default {
       }
 
       if (route.route.kind === "home") {
-        return cachePublic(await renderHomeSeoAsset(env, request, { index: await readIndex(env) }), request, ctx, CACHE.home);
+        const raw = await readStatsCacheRaw(env.DB, HOME_INDEX_CACHE_KEY);
+        let index: PublicIndexPayload | null = null;
+        try {
+          index = raw ? JSON.parse(raw) as PublicIndexPayload : null;
+        } catch {
+          index = null;
+        }
+        if (!index) {
+          const full = await readIndex(env);
+          index = full ? buildHomeIndex(full) : null;
+        }
+        return cachePublic(await renderHomeSeoAsset(env, request, { index, raw: index && raw ? raw : null }), request, ctx, CACHE.home);
       }
 
       // Canonical spelling for the data pages (e.g. /fr/stromausfall/x → /fr/panne-de-courant/x).
@@ -320,8 +335,9 @@ export default {
     const operatorPath = parseOperatorPath(url.pathname);
     if (operatorPath && request.method === "GET") {
       if (operatorPath.hub) {
-        const items = await listPublicItemsLite(env.DB);
-        return cachePublic(await renderSeoOperatorHubAsset(env, request, items), request, ctx, "public,max-age=60,s-maxage=180,stale-while-revalidate=900");
+        const cached = await readStatsCache<Record<string, OperatorLiveStats>>(env.DB, OPERATOR_STATS_CACHE_KEY);
+        const source = cached?.payload ?? await listPublicItemsLite(env.DB);
+        return cachePublic(await renderSeoOperatorHubAsset(env, request, source), request, ctx, "public,max-age=60,s-maxage=180,stale-while-revalidate=900");
       }
       const profile = operatorBySlug(operatorPath.slug);
       if (profile) {
@@ -344,12 +360,17 @@ export default {
         const indexablePlaces = (places?.places ?? [])
           .filter(([, , , count, current, lastAt]) => placeIsIndexable({ total: count, active: current, upcoming: 0, lastAt }))
           .map(([slug, , , , , lastAt]) => ({ slug, lastAt }));
-        const cantonLastmods = new Map<string, string | null>();
+        // Cantons with an indexable page are the ones with events of their own
+        // (public_events.canton), exactly the rule the canton page applies.
+        const placeLastmods = new Map<string, string | null>();
         for (const [, , canton, , , lastAt] of places?.places ?? []) {
           if (!canton) continue;
-          const previous = cantonLastmods.get(canton);
-          if (!previous || (lastAt && lastAt > previous)) cantonLastmods.set(canton, lastAt);
+          const previous = placeLastmods.get(canton);
+          if (!previous || (lastAt && lastAt > previous)) placeLastmods.set(canton, lastAt);
         }
+        const cantonLastmods = new Map<string, string | null>(
+          (stats?.payload.byCanton ?? []).filter((entry) => entry.total > 0).map((entry) => [entry.code, placeLastmods.get(entry.code) ?? null])
+        );
         documents = buildPublicSitemapDocuments({
           events: items.map((item) => ({ url: item.url, updated_at: item.updated_at })),
           operatorLastmods: operatorSitemapLastmods(items),
@@ -383,8 +404,9 @@ export default {
     }
 
     if (url.pathname === "/api/public/index.json" && request.method === "GET") {
-      const index = await readIndex(env) ?? buildPublicIndex([]);
-      return cachePublic(Response.json(index), request, ctx, CACHE.api);
+      const raw = await readStatsCacheRaw(env.DB, INDEX_CACHE_KEY);
+      const body = raw ?? JSON.stringify(await readIndex(env) ?? buildPublicIndex([]));
+      return cachePublic(new Response(body, { headers: { "Content-Type": "application/json; charset=utf-8" } }), request, ctx, CACHE.api);
     }
 
     if (url.pathname === "/api/public/stats.json" && request.method === "GET") {
@@ -460,12 +482,16 @@ export default {
       if (!isAuthorized(request, env)) return unauthorized();
       try {
         const body = await readJsonBody(request);
+        // Small default batches keep each call inside the 10 ms CPU budget.
         const projection = await refreshPublicProjection(env, {
-          limit: typeof body.limit === "number" ? body.limit : 250,
+          limit: typeof body.limit === "number" ? body.limit : 80,
           resolveLocations: typeof body.resolve_locations === "number" ? Math.min(10, body.resolve_locations) : 0,
-          sweepOrphans: true
+          sweepOrphans: body.sweep === true,
+          fullBeforeId: body.full === true
+            ? (typeof body.before_id === "number" ? body.before_id : Number.MAX_SAFE_INTEGER)
+            : undefined
         });
-        const aggregates = await refreshPublicAggregates(env, { projectionChanged: true, force: body.force_stats === true });
+        const aggregates = await refreshPublicAggregates(env, { projectionChanged: projection.written + projection.removed > 0, force: body.force_stats === true });
         return json({ ok: true, projection, aggregates });
       } catch (error) {
         return badRequest(error instanceof Error ? error.message : String(error));
