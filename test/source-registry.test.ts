@@ -16,6 +16,8 @@ import alertswissFixture from "./fixtures/operators/alertswiss.json?raw";
 import repowerWarningsFixture from "./fixtures/operators/repower-warnings.json?raw";
 import repowerClearFixture from "./fixtures/operators/repower-clear.json?raw";
 import sesFixture from "./fixtures/operators/ses.html?raw";
+import tbFlawilFixture from "./fixtures/operators/tb-flawil.html?raw";
+import ailFixture from "./fixtures/operators/ail.html?raw";
 
 function geoIdentifyBody(municipality: string, canton = "BE"): string {
   return JSON.stringify({
@@ -757,6 +759,78 @@ describe("source registry observations", () => {
       "planned:Gordola",
       "planned:Quartino"
     ]);
+  });
+
+  it("parses TB Flawil electricity interruptions and skips heating, telecom and voltage dips", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(tbFlawilFixture, { status: 200 })));
+    const result = await fetchSourceObservations(
+      { FIRECRAWL_API_KEY: undefined },
+      registry({
+        source_key: "tb-flawil-betriebsinfo",
+        operator_name: "TB Flawil",
+        url: "https://www.tbflawil.ch/betriebsinfo",
+        area_text: "Flawil",
+        adapter_config_json: '{"language":"de","status_mode":"local_status"}'
+      }),
+      "2026-11-04T12:00:00.000Z"
+    );
+
+    expect(result.error).toBeNull();
+    expect(result.parserStatus).toBe("ready");
+    const titles = result.observations.map((item) => item.title);
+    expect(titles.some((title) => /Botsberg/.test(title))).toBe(true);
+    expect(titles.some((title) => /thurcom|Fernw|Spannungseinbruch/i.test(title))).toBe(false);
+    const botsberg = result.observations.find((item) => /Botsberg/.test(item.title))!;
+    expect(botsberg.canonicalStatus).toBe("resolved");
+    expect(botsberg.locationText).toBe("Flawil");
+    expect(botsberg.startedAt).toBe("2026-09-15T09:06:00.000Z");
+    expect(botsberg.resolvedAt).toBe("2026-09-15T09:20:00.000Z");
+  });
+
+  it("parses AIL service notices and keeps only the electricity sector", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(ailFixture, { status: 200 })));
+    const result = await fetchSourceObservations(
+      { FIRECRAWL_API_KEY: undefined },
+      registry({
+        source_key: "ail-homepage",
+        operator_name: "AIL",
+        url: "https://www.ail.ch/privati.html",
+        area_text: "Lugano und AIL Versorgungsgebiet",
+        adapter_config_json: '{"language":"it","status_mode":"ail_comunicati"}'
+      }),
+      "2026-11-04T12:00:00.000Z"
+    );
+    const electricity = (ailFixture.match(/Elettricit/g) ?? []).length;
+    expect(result.error).toBeNull();
+    expect(result.parserStatus).toBe("ready");
+    expect(result.observations).toHaveLength(electricity);
+    expect(result.observations.every((item) => /^Interruzione di corrente pianificata a /.test(item.title))).toBe(true);
+    for (const item of result.observations) {
+      expect(item.startedAt).toBeTruthy();
+      const ended = item.resolvedAt ? Date.parse(item.resolvedAt) <= Date.parse("2026-11-04T12:00:00.000Z") : false;
+      expect(item.canonicalStatus).toBe(ended ? "resolved" : "planned");
+    }
+  });
+
+  it("reads 'Zurzeit sind keine Unterbrechungen geplant' as an all-clear", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      "<html><body><h1>Stromabschaltung, Stromausfall und Störungen im Stromnetz</h1><p>Geplante und kurzfristige Unterbrechungen: Zurzeit sind keine Unterbrechungen geplant.</p></body></html>",
+      { status: 200 }
+    )));
+    const result = await fetchSourceObservations(
+      { FIRECRAWL_API_KEY: undefined },
+      registry({
+        source_key: "ew-urnaesch-stoerungen",
+        operator_name: "EW Urnäsch",
+        source_category: "news_feed",
+        url: "https://ewurnaesch.ch/kundenservice/aktuelle-stoerungen/",
+        adapter_config_json: '{"language":"de","status_mode":"news_feed","utility_filter":"electricity_only"}'
+      }),
+      "2026-11-04T12:00:00.000Z"
+    );
+    expect(result.error).toBeNull();
+    expect(result.parserStatus).toBe("no_current_outage");
+    expect(result.observations.every((item) => item.canonicalStatus === "irrelevant")).toBe(true);
   });
 
   it("geocodes a SAK failure from coordinates when the title is not enough", async () => {

@@ -522,14 +522,14 @@ export const SOURCE_REGISTRY_SEEDS: SourceRegistrySeed[] = [
     source_key: "ail-homepage",
     operator_name: "AIL",
     source_type: "html",
-    source_category: "news_feed",
-    url: "https://www.ail.ch/news-media/News.html",
+    source_category: "live_status",
+    url: "https://www.ail.ch/privati.html",
     area_text: "Lugano und AIL Versorgungsgebiet",
     trust_level: "official",
     check_interval_minutes: 30,
     priority: 87,
     firecrawl_enabled: 0,
-    adapter_config: { language: "it", status_mode: "news_feed", utility_filter: "electricity_only", no_outage_terms: ["nessun guasto", "nessuna interruzione", ...commonNoOutageTerms] }
+    adapter_config: { language: "it", status_mode: "ail_comunicati", utility_filter: "electricity_only", no_outage_terms: ["nessun guasto", "nessuna interruzione", ...commonNoOutageTerms] }
   },
   {
     source_key: "sil-lausanne",

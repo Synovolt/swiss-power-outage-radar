@@ -3,7 +3,7 @@ import { derivePublicPlaces } from "../src/public-places";
 import { buildPlacePage, buildStatsPage } from "../src/seo-data-pages";
 import { computePublicStats } from "../src/public-stats";
 import { cantonByName } from "../src/swiss-cantons";
-import { decodeFeedCursor, encodeFeedCursor, stableItemKey } from "../src/public-projection";
+import { backfillEventCantons, decodeFeedCursor, encodeFeedCursor, stableItemKey } from "../src/public-projection";
 import { buildHomeIndex, type IndexEntry, type PublicIndexPayload, INDEX_FIELDS } from "../src/public-stats";
 
 describe("regressions found in review", () => {
@@ -101,5 +101,37 @@ describe("regressions found in review", () => {
     expect(luzern.html).not.toContain("Luzern (Luzern)");
     const brugg = buildPlacePage({ slug: "brugg-ag", name: "Brugg", canton: "AG", slice, items: [], nearby: [], generatedAt: "2026-11-04T12:00:00.000Z" }, "de");
     expect(brugg.html).toContain("Brugg (Aargau)");
+  });
+
+  it("fills a missing canton from the map pin and marks misses so they are not retried", async () => {
+    const statements: Array<{ sql: string; binds: unknown[] }> = [];
+    const db = {
+      prepare(sql: string) {
+        return {
+          bind(...binds: unknown[]) {
+            const statement = {
+              sql,
+              binds,
+              all: async () => ({ results: [
+                { event_id: 7, latitude: 46.17, longitude: 8.77 },
+                { event_id: 8, latitude: 46.0, longitude: 6.0 }
+              ] })
+            };
+            return statement;
+          }
+        };
+      },
+      batch: async (list: Array<{ sql: string; binds: unknown[] }>) => { statements.push(...list); return []; }
+    } as unknown as D1Database;
+    const lookup = async (lat: number) => (lat > 46.1 ? { municipality: "Locarno", canton: "TI" } : null);
+    const result = await backfillEventCantons({ DB: db }, { limit: 4, lookup });
+    expect(result).toEqual({ checked: 2, filled: 1, errors: [] });
+    expect(statements.map((statement) => statement.binds)).toEqual([["TI", 7], ["", 8]]);
+    expect(statements[0].sql).toContain("canton IS NULL");
+  });
+
+  it("treats an empty stored canton (a failed lookup) as unknown", () => {
+    expect(derivePublicPlaces({ location: "Someo", eventCanton: "" }).canton).toBeNull();
+    expect(derivePublicPlaces({ location: "Someo", eventCanton: "ti" }).canton).toBe("TI");
   });
 });

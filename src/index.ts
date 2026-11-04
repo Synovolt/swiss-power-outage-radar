@@ -61,6 +61,7 @@ import {
   getPublicPlace,
   listPublicFeed,
   listPublicItems,
+  backfillEventCantons,
   listPublicItemsLite,
   readStatsCache,
   readStatsCacheRaw,
@@ -483,6 +484,9 @@ export default {
       try {
         const body = await readJsonBody(request);
         // Small default batches keep each call inside the 10 ms CPU budget.
+        const cantons = typeof body.resolve_cantons === "number"
+          ? await backfillEventCantons(env, { limit: Math.min(25, body.resolve_cantons) })
+          : null;
         const projection = await refreshPublicProjection(env, {
           limit: typeof body.limit === "number" ? body.limit : 80,
           resolveLocations: typeof body.resolve_locations === "number" ? Math.min(10, body.resolve_locations) : 0,
@@ -492,7 +496,7 @@ export default {
             : undefined
         });
         const aggregates = await refreshPublicAggregates(env, { projectionChanged: projection.written + projection.removed > 0, force: body.force_stats === true });
-        return json({ ok: true, projection, aggregates });
+        return json({ ok: true, cantons, projection, aggregates });
       } catch (error) {
         return badRequest(error instanceof Error ? error.message : String(error));
       }

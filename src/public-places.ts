@@ -53,7 +53,8 @@ function splitLocation(location: string): string[] {
  */
 export function derivePublicPlaces(input: PublicPlaceInput): { places: PublicPlace[]; canton: string | null } {
   const parts = splitLocation(input.location);
-  let canton = input.eventCanton?.toUpperCase() ?? null;
+  // "" marks a canton lookup that found nothing (see backfillEventCantons); treat as unknown.
+  let canton = input.eventCanton?.trim() ? input.eventCanton.trim().toUpperCase() : null;
   const places: PublicPlace[] = [];
   const seen = new Set<string>();
 
