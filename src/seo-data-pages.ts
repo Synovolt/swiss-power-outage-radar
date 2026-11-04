@@ -174,7 +174,7 @@ export function buildStatsPage(stats: StatsPayload | null, locale: AppLocale, no
     };
   }
   // Abbreviations like "3 Std." must not produce "Std.." at the end of a sentence.
-  const s = (key: string, options?: Record<string, unknown>) => t(locale, `data.stats.${key}`, options).replace(/..(?=s|$)/g, ".");
+  const s = (key: string, options?: Record<string, unknown>) => t(locale, `data.stats.${key}`, options).replace(/\.\.(?=\s|$)/g, ".");
   const totals = stats.totals;
   const delta = totals.last30 - totals.previous30;
   const deltaText = `${delta > 0 ? "+" : ""}${delta}`;

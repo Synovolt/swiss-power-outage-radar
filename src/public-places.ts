@@ -18,7 +18,8 @@ export interface PublicPlaceInput {
 
 const MAX_PLACES = 12;
 const GENERIC_PLACES = new Set(["schweiz", "suisse", "svizzera", "switzerland", "unknown", "unbekannt", "region", "gemeinde"]);
-const PREFIX = /^(?:gemeinde|gemeindegebiet|stadt|ortschaft|commune de|commune d'|ville de|comune di|region|région|regione|quartier|ortsteil)\s+/i;
+// "Commune d'Ollon" has no space after the apostrophe, hence the separate branch.
+const PREFIX = /^(?:(?:gemeinde|gemeindegebiet|stadt|ortschaft|commune de|ville de|comune di|region|région|regione|quartier|ortsteil)\s+|(?:commune|ville|comune) d['’]\s*)/i;
 
 function cleanPart(part: string): string {
   return part

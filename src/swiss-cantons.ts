@@ -53,7 +53,11 @@ function fold(value: string): string {
 
 const BY_NAME = new Map<string, SwissCanton>();
 for (const canton of SWISS_CANTONS) {
-  for (const name of [...Object.values(canton.names), ...canton.aliases, `Kanton ${canton.names.de}`, `canton de ${canton.names.fr}`, `canton du ${canton.names.fr}`]) {
+  const bare = [...Object.values(canton.names), ...canton.aliases];
+  // "Kanton Bern", "Canton Vaud", "canton of Vaud", "Cantone Ticino", "cantone di Ticino",
+  // "canton de Vaud" / "canton du Valais" / "canton d'Argovie".
+  const prefixed = bare.flatMap((name) => ["kanton", "canton", "canton of", "cantone", "cantone di", "canton de", "canton du"].map((prefix) => `${prefix} ${name}`));
+  for (const name of [...bare, ...prefixed, `canton ${canton.frOf}`]) {
     BY_NAME.set(fold(name), canton);
   }
 }
@@ -99,8 +103,8 @@ export function cantonBySlug(slug: string | null | undefined): SwissCanton | nul
 }
 
 /**
- * Extracts a canton from a place label such as "Chavornay (VD)", "Brugg AG" or
- * "Brugg, Aargau". Returns the cleaned place name without the canton marker.
+ * Extracts a canton from a place label such as "Chavornay (VD)" or "Brugg AG"
+ * (comma lists like "Brugg, Aargau" are handled by derivePublicPlaces). Returns the cleaned place name.
  */
 export function splitCantonSuffix(label: string): { name: string; canton: string | null } {
   const trimmed = label.replace(/\s+/g, " ").trim();

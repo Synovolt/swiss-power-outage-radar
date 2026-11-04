@@ -234,7 +234,7 @@ export function computePublicStats(
   const weekdayHour = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => 0));
   let weekdayHourN = 0;
   for (const row of rows) {
-    if (row.nature !== "unplanned" || !row.started_at) continue;
+    if (row.nature === "planned" || !row.started_at) continue;
     const ms = dbTimeMs(row.started_at);
     if (!Number.isFinite(ms) || ms > now) continue;
     const local = zurich(ms);
@@ -258,7 +258,7 @@ export function computePublicStats(
   let estimated = 0;
   const unplannedMinutes: number[] = [];
   for (const row of rows) {
-    if (row.nature !== "unplanned") continue;
+    if (row.nature === "planned") continue;
     const start = dbTimeMs(row.started_at ?? row.active_since_at);
     if (!Number.isFinite(start)) continue;
     if (row.resolved_at) {
