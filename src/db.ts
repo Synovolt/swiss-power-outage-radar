@@ -515,6 +515,7 @@ export async function getLinkedRelevantItemsNeedingCandidate(
       `SELECT ai.*
        FROM alert_items ai
        WHERE ai.outage_event_id IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM outage_events e WHERE e.id = ai.outage_event_id AND e.origin = 'operator')
          AND ai.is_relevant = 1
          AND ai.confidence >= 0.65
          AND ai.country IN ('CH', 'unknown')

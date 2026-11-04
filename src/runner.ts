@@ -311,6 +311,9 @@ async function maybeAutoResearchHighConfidenceEvent(
 }
 
 export async function applyPublicationGate(env: Env, event: OutageEvent): Promise<OutageEvent> {
+  // Operator incidents are published by the operator pipeline from their records;
+  // the fact-based media gate must never overwrite that decision.
+  if (event.origin === "operator") return event;
   const [sources, facts, authorityHosts] = await Promise.all([
     getOutageEventSources(env.DB, event.id),
     getOutageEventFacts(env.DB, event.id),

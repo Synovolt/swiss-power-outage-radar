@@ -348,7 +348,6 @@ export function deriveIncident(records: StoredRecord[], source: IncidentSource):
 
   const unpublishableReasons: string[] = [];
   if (!locationText) unpublishableReasons.push("place_unresolved");
-  if (qualityFlags.has("merged_episodes_suspected")) unpublishableReasons.push("merged_episodes_suspected");
 
   return {
     kind,
