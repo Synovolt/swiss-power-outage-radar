@@ -14,9 +14,9 @@ Ungeplante, noch aktive Ereignisse werden inkrementell aktualisiert: frühestens
 
 Der öffentliche Zustand eines Ereignisses (Status, Beginn, Ende, Vertrauen, Kanton, Orte, Betreiber) wird genau an einer Stelle berechnet: `toPublicFeedItem()` in `src/publication.ts`. `src/public-projection.ts` materialisiert das Ergebnis in `public_events` und `public_event_places` (Migration `0020_public_projection.sql`). Alle öffentlichen Seiten, die APIs, die Sitemap und die Statistik lesen nur diese Projektion. Dadurch zeigen Startseite, Detailseite, Betreiber-, Orts- und Statistikseiten immer dieselben Zahlen.
 
-- Der Cron aktualisiert pro Lauf höchstens 400 neue, geänderte oder zeitabhängige Zeilen (bevorstehend/aktiv) und schreibt nur Zeilen, deren Ergebnis sich wirklich geändert hat.
+- Der Cron findet Kandidaten über indexierte Abfragen «geändert seit Watermark» (Event, Publikationsentscheid, Kartenpunkt) plus die zeitabhängigen Zeilen (bevorstehend/aktiv). Er verarbeitet höchstens 60 Zeilen pro Lauf und schreibt nur echte Änderungen. Ein routinemässiges «weiterhin gelistet» zählt nicht als Änderung: `last_confirmed_active_at` wird höchstens stündlich neu geschrieben.
 - Fehlende Kartenpunkte werden mit höchstens 3 geo.admin-Abfragen pro Lauf nachgeholt.
-- `src/public-stats.ts` legt den kompakten Such-/Kartenindex, die Ortsliste, die Betreiber-Kennzahlen und die nationale Statistik als je eine Zeile in `public_stats_cache` ab. Index und Ortsliste folgen jeder Änderung, Statistik und Betreiber-Kennzahlen höchstens stündlich.
+- `src/public-stats.ts` legt den kompakten Such-/Kartenindex, eine kleine «Jetzt»-Teilmenge für die Startseite, die Ortsliste, die Betreiber-Kennzahlen und die nationale Statistik als je eine Zeile in `public_stats_cache` ab. Index, Teilmenge und Ortsliste folgen jeder Änderung. Statistik und Betreiber-Kennzahlen werden höchstens stündlich neu berechnet, und nie im selben Lauf wie der Index (ausser sie sind älter als drei Stunden).
 - Geplante Unterbrüche gelten nach Ablauf des angekündigten Zeitfensters als beendet (Ende = angekündigtes Ende), solange die Quelle sie nicht weiter bestätigt.
 - Automatisch geschlossene Ausfälle behalten ihr Ende-Zeitfenster (`resolution_earliest_at` = zuletzt bestätigt, `resolution_latest_at` = erste Abfrage ohne Meldung). Die Statistik schätzt die Dauer aus der Mitte dieses Fensters und weist exakte und geschätzte Werte getrennt aus.
 
@@ -24,10 +24,10 @@ Neue öffentliche Seiten (alle vier Sprachen, eigene hreflang, Breadcrumb- und J
 
 - `/statistik/` (`/fr/statistiques/`, `/it/statistiche/`, `/en/statistics/`): Kennzahlen, Wochenverlauf, Wochentag × Stunde, Vorlauf, Dauer, Betreiber, Kantone, Orte. Serverseitige SVG-Diagramme ohne Client-JavaScript, `Dataset`-JSON-LD.
 - `/stromausfall/`: alle Orte nach Kanton.
-- `/stromausfall/<ort>`, z. B. `/stromausfall/brugg`: Live-Status, Verlauf, FAQ und Nachbarorte. Indexiert ab 2 Ereignissen oder einer Meldung in den letzten 90 Tagen.
+- `/stromausfall/<ort>-<kanton>`, z. B. `/stromausfall/brugg-ag`: Live-Status, Verlauf, FAQ und Nachbarorte. Der Kanton im Slug trennt gleichnamige Gemeinden (Buchs AG/SG/ZH). Indexiert ab 2 Ereignissen oder einer Meldung in den letzten 90 Tagen.
 - `/stromausfall/kanton/<kanton>` mit lokalisierten Slugs (`/fr/panne-de-courant/canton/vaud`).
 
-Die Startseite rendert die aktuelle Liste serverseitig (sichtbar, crawlbar) und bettet den kompakten Index ein. Suche und Filter laufen im Browser über alle öffentlichen Meldungen der letzten 365 Tage, nicht nur über die erste Seite.
+Die Startseite rendert die aktuelle Liste serverseitig (sichtbar, crawlbar) und bettet nur die «Jetzt»-Teilmenge mit vorberechneten Zählern ein. Den vollständigen Index (`/api/public/index.json`, 365 Tage) lädt der Browser im Leerlauf oder sobald gesucht bzw. die Ansicht gewechselt wird. Suche und Filter laufen dann über alle öffentlichen Meldungen, nicht nur über die erste Seite.
 
 ## Cloudflare Free Tier
 
@@ -262,11 +262,13 @@ npm run db:migrate:remote
 npm run deploy
 ```
 
-Nach einem Deploy mit neuer Projektion diese sofort aufbauen, statt auf den nächsten Cron-Lauf zu warten. Den Aufruf wiederholen, bis `projection.candidates` 0 ist. Bis dahin liefern Detailseite und `/api/public/events` über einen Fallback weiterhin Daten.
+Nach einem Deploy, der die Projektion einführt oder ihre Logik ändert, diese sofort vollständig neu aufbauen. Der Aufruf ist paginiert: mit dem zurückgegebenen `projection.nextBeforeId` als `before_id` wiederholen, bis er `null` ist. Bis dahin liefern Detailseite und `/api/public/events` über einen Fallback weiterhin Daten.
 
 ```bash
-curl -X POST https://outage.ch/admin/projection/rebuild   -H "Authorization: Bearer <ADMIN_TOKEN>"   -H "Content-Type: application/json"   -d '{"limit":250,"force_stats":true}'
+curl -X POST https://outage.ch/admin/projection/rebuild   -H "Authorization: Bearer <ADMIN_TOKEN>"   -H "Content-Type: application/json"   -d '{"full":true,"limit":80}'
 ```
+
+Danach einmal ohne `full` und mit `"force_stats":true` aufrufen. Das setzt die Watermark für die inkrementellen Läufe und berechnet die Statistik.
 
 Nach dem Deployment:
 
