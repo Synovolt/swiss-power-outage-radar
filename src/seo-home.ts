@@ -22,9 +22,14 @@ import {
 import type { PublicIndexPayload } from "./public-stats";
 import type { Env } from "./types";
 
-export function homeLiveCounts(items: RadarItem[], now = Date.now()): { active: number; upcoming: number } {
+/**
+ * "active" counts outages only. Planned works whose window is running are
+ * "running": they are not a disturbance and are shown separately.
+ */
+export function homeLiveCounts(items: RadarItem[], now = Date.now()): { active: number; running: number; upcoming: number } {
   return {
-    active: items.filter((item) => item.status === "active").length,
+    active: items.filter((item) => item.status === "active" && item.nature !== "planned").length,
+    running: items.filter((item) => item.status === "active" && item.nature === "planned").length,
     upcoming: items.filter((item) => item.status === "upcoming" && inView(item, "now", now)).length
   };
 }
@@ -126,6 +131,14 @@ export async function renderHomeSeoAsset(
       .on("[data-live]", {
         element(element) {
           if (live.active > 0) element.setAttribute("data-has-active", "");
+        }
+      })
+      .on("[data-live-running]", {
+        element(element) {
+          if (live.running > 0) {
+            element.setInnerContent(live.running === 1 ? copy.tiles.runningOne : copy.tiles.runningOther.replace("{{count}}", String(live.running)));
+            element.removeAttribute("hidden");
+          }
         }
       });
   }

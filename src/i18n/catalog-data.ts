@@ -164,7 +164,7 @@ export const dataDe = {
     hours: "{{value}} h",
     days: "{{value}} Tage",
     kpiShareUnplanned: "Davon ungeplant",
-    kpiShareNote: "{{planned}} geplante Unterbrüche",
+    kpiShareNote: "{{unplanned}} von {{total}} Meldungen",
     kpiMedianUnplanned: "Typische Dauer ungeplant",
     kpiMedianNote: "Median, {{count}} Ausfälle",
     weeklyTakeaway: "Stärkste Woche: ab {{week}} mit {{count}} Meldungen.",
@@ -369,7 +369,7 @@ export const dataFr: DataCatalog = {
     hours: "{{value}} h",
     days: "{{value}} jours",
     kpiShareUnplanned: "Dont non planifiées",
-    kpiShareNote: "{{planned}} coupures planifiées",
+    kpiShareNote: "{{unplanned}} sur {{total}} signalements",
     kpiMedianUnplanned: "Durée typique non planifiée",
     kpiMedianNote: "Médiane, {{count}} pannes",
     weeklyTakeaway: "Semaine la plus chargée : dès le {{week}} avec {{count}} signalements.",
@@ -572,7 +572,7 @@ export const dataIt: DataCatalog = {
     hours: "{{value}} h",
     days: "{{value}} giorni",
     kpiShareUnplanned: "Di cui non pianificate",
-    kpiShareNote: "{{planned}} interruzioni pianificate",
+    kpiShareNote: "{{unplanned}} su {{total}} segnalazioni",
     kpiMedianUnplanned: "Durata tipica non pianificata",
     kpiMedianNote: "Mediana, {{count}} guasti",
     weeklyTakeaway: "Settimana più intensa: dal {{week}} con {{count}} segnalazioni.",
@@ -775,7 +775,7 @@ export const dataEn: DataCatalog = {
     hours: "{{value}} h",
     days: "{{value}} days",
     kpiShareUnplanned: "Of which unplanned",
-    kpiShareNote: "{{planned}} planned interruptions",
+    kpiShareNote: "{{unplanned}} of {{total}} reports",
     kpiMedianUnplanned: "Typical unplanned duration",
     kpiMedianNote: "Median, {{count}} outages",
     weeklyTakeaway: "Busiest week: from {{week}} with {{count}} reports.",

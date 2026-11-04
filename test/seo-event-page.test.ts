@@ -188,6 +188,21 @@ describe("SEO event page", () => {
     expect(html).not.toContain("<dt>Dauer</dt>");
   });
 
+  it("says 'ended between' when the end was measured between two polls", () => {
+    const measured = detail();
+    measured.item.status = "resolved";
+    measured.item.resolved_at = null;
+    measured.item.duration_minutes = null;
+    measured.item.time_confidence = "inferred";
+    measured.item.last_confirmed_active_at = "2026-07-29T09:00:00.000Z";
+    measured.item.resolution_latest_at = "2026-07-29T09:45:00.000Z";
+
+    const html = renderEventSeoMarkup(measured);
+    expect(html).toContain("Beendet zwischen");
+    expect(html).not.toContain("nicht mehr gemeldet");
+    expect(html).not.toContain("<dt>Ende</dt><dd>≤");
+  });
+
   it("links matching operators to their profile page", () => {
     const withOperator = detail();
     withOperator.operator = {

@@ -449,7 +449,7 @@ async function parseBkwPayload(
         return makeKnownObservation(source, {
           status: cluster.status,
           title,
-          text: compact(`${title}. ${cluster.items.length} Trafostationen betroffen${names ? `: ${names}` : ""}.`),
+          text: compact(`${title}. ${cluster.items.length} ${cluster.items.length === 1 ? "Trafostation" : "Trafostationen"} betroffen${names ? `: ${names}` : ""}.`),
           location: cluster.location,
           observedAt,
           startedAt: earliestIso(cluster.items.map((item) => item.startedAt)),

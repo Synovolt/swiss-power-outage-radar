@@ -80,6 +80,7 @@ const u = (key: string, options?: Record<string, unknown>) => t(locale, `ui.home
           <button type="button" class="pulse__line pulse__line--active" data-go-view="now">
             <span class="pulse__n" data-live-count="active">–</span>
             <span class="pulse__label" data-live-label="active">{copy.tiles.activeOther}</span>
+            <span class="pulse__hint" data-live-running hidden></span>
           </button>
           <button type="button" class="pulse__line pulse__line--upcoming" data-go-view="planned">
             <span class="pulse__n" data-live-count="upcoming">–</span>
@@ -420,7 +421,9 @@ const u = (key: string, options?: Record<string, unknown>) => t(locale, `ui.home
 
     function renderLive() {
       const t = now();
-      const active = state.items.filter((item) => item.status === "active" && matchesNature(item, "")).length;
+      // Running planned works are not disturbances: counted apart from outages.
+      const active = state.items.filter((item) => item.status === "active" && item.nature !== "planned").length;
+      const running = state.items.filter((item) => item.status === "active" && item.nature === "planned").length;
       const counts = viewCounts(state.items, "", t);
       const planned = state.partial && state.embeddedCounts ? state.embeddedCounts.planned : counts.planned;
       const set = (selector: string, value: string) => {
@@ -432,6 +435,11 @@ const u = (key: string, options?: Record<string, unknown>) => t(locale, `ui.home
       set('[data-live-label="active"]', active === 1 ? copy.tiles.activeOne : copy.tiles.activeOther);
       set('[data-live-label="upcoming"]', planned === 1 ? copy.tiles.plannedOne : copy.tiles.plannedOther);
       liveEl.toggleAttribute("data-has-active", active > 0);
+      const runningEl = liveEl.querySelector<HTMLElement>("[data-live-running]");
+      if (runningEl) {
+        runningEl.hidden = running === 0;
+        runningEl.textContent = running === 1 ? copy.tiles.runningOne : copy.tiles.runningOther.replace("{{count}}", String(running));
+      }
     }
 
     function renderControls() {
