@@ -1,6 +1,6 @@
 # Swiss Power Outage Radar
 
-Schlanker Cloudflare-MVP: ein Cron-Worker prüft alle 15 Minuten direkte Netzbetreiberquellen aus der `source_registry` und nutzt Google Alerts nur noch als Discovery-Quelle. Alle Funde werden als unveränderliche `source_observations` gespeichert und erst danach in die Pipeline aus `alert_items`, `outage_candidates`, `outage_facts`, Snapshots, OpenPLZ/Geo-Erkennung, Exa-Recherche, Event-Merging und Quality Gates eingespeist.
+Schlanker Cloudflare-MVP: ein Cron-Worker prüft alle 15 Minuten direkte Netzbetreiberquellen aus der `source_registry` und nutzt Google Alerts nur noch als Discovery-Quelle. Betreiberdaten laufen über eine eigene Pipeline: Rohdaten in R2 → `source_polls` → `source_records` (Identität vom Betreiber, gemessene Sichtungsfenster) → daraus deterministisch abgeleitete Ereignisse. Medienfunde (Google Alerts) laufen weiterhin über `alert_items`, `outage_candidates`, `outage_facts`, Snapshots, Exa-Recherche und Quality Gates. Details: [docs/data-pipeline.md](docs/data-pipeline.md).
 
 Ein öffentliches `outage_event` entsteht automatisch nur, wenn mindestens eine offizielle Netzbetreiber-/Behördenquelle vorliegt oder mindestens zwei unabhängige glaubwürdige Quellen dasselbe Ereignis belegen. Alles andere bleibt Kandidat, Review-Fall oder nicht öffentliche Quellenbeobachtung. Relevante Quellen werden in einem Browser-Run-Aufruf als Markdown und verlustfreier Full-Page-PNG-Screenshot in R2 gesichert. Öffentliche Screenshots werden über `/api/public/evidence/:snapshotId.png` nur so lange ausgeliefert, wie das zugehörige Ereignis veröffentlicht ist.
 
@@ -138,6 +138,8 @@ Polling-Regel:
 
 Bei generischen HTML-Seiten gilt ein Sicherheitsmodus: negative Statusmeldungen wie "keine Störung" werden als erfolgreiche `irrelevant`-Observation gespeichert. Nicht-negative Treffer aus Karten-, News-, Multi-Utility- oder nicht verifizierten Vollseiten werden dagegen mit `parser_needs_adapter` gestoppt, bis ein item-spezifischer Adapter oder stabiler JSON/API-Endpunkt vorhanden ist. Dadurch werden Archiv-, Navigations- und FAQ-Texte nicht als Stromausfall-Kandidaten veröffentlicht.
 
+**Seit Pipeline v2** (Migration `0023_operator_records.sql`, [docs/data-pipeline.md](docs/data-pipeline.md)) wird jedes Betreiber-Item zu einem `source_records`-Eintrag mit der Identität des Betreibers (BKW-Trafonummer, Romande-/SAK-UUID, Primeo Titel + Start). Beginn und Ende werden aus vollständigen Abfragen gemessen, Ereignisse (`outage_events.origin = 'operator'`) daraus abgeleitet. Fernwärme-, Wasser- und Gasmeldungen werden verworfen. Der folgende Abschnitt beschreibt die Beobachtungs-Klassifikation der Item-Adapter, die weiterhin die Rohsignale für HTML-Quellen liefert.
+
 Die Adapter schreiben immutable `source_observations` mit `canonical_status`:
 
 - `planned`: geplanter Stromunterbruch
@@ -269,6 +271,8 @@ curl -X POST https://outage.ch/admin/projection/rebuild   -H "Authorization: Bea
 ```
 
 Danach einmal ohne `full` und mit `"force_stats":true` aufrufen. Das setzt die Watermark für die inkrementellen Läufe und berechnet die Statistik.
+
+Einmalig beim Wechsel auf Pipeline v2 (Migration `0023`): Historie mit `scripts/rebuild-operator-history.mts` aus einem frischen Prod-Export neu aufbauen und das erzeugte SQL vor dem Deploy einspielen. Ablauf und Grenzen in [docs/data-pipeline.md](docs/data-pipeline.md#historie-neu-aufbauen). Kennzahlen vor und nach einer Änderung liefert `npx vite-node scripts/data-quality-report.mts -- --db <kopie.db> --project`.
 
 Nach dem Deployment:
 

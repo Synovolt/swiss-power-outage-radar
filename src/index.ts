@@ -203,6 +203,20 @@ async function republish(env: Env, eventIds: number[]): Promise<void> {
   await refreshPublicAggregates(env, { projectionChanged: projection.written + projection.removed > 0 });
 }
 
+/** 301 to the incident an event was merged into (duplicates found by the operator pipeline). */
+async function mergedEventRedirect(env: Env, eventId: number, origin: string): Promise<Response | null> {
+  let id = eventId;
+  for (let hop = 0; hop < 3; hop += 1) {
+    const row = await env.DB.prepare("SELECT merged_into_event_id FROM outage_events WHERE id = ?")
+      .bind(id).first<{ merged_into_event_id: number | null }>();
+    if (!row?.merged_into_event_id) break;
+    id = row.merged_into_event_id;
+  }
+  if (id === eventId) return null;
+  const target = await loadPublicEventDetail(env, id);
+  return target ? Response.redirect(new URL(target.item.url, origin).toString(), 301) : null;
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const forcedHttps = httpsRedirect(request);
@@ -228,7 +242,10 @@ export default {
     const legacyEvent = url.pathname.match(/^\/events\/(\d+)\/?$/);
     if (legacyEvent && isRead) {
       const detail = await loadPublicEventDetail(env, Number(legacyEvent[1]));
-      if (!detail) return new Response("Event nicht gefunden", { status: 404 });
+      if (!detail) {
+        const merged = await mergedEventRedirect(env, Number(legacyEvent[1]), publicOrigin);
+        return merged ?? new Response("Event nicht gefunden", { status: 404 });
+      }
       return Response.redirect(new URL(detail.item.url, publicOrigin).toString(), 301);
     }
 
@@ -239,7 +256,11 @@ export default {
       if (route.route.kind === "event") {
         const eventId = publicEventIdFromPath(url.pathname);
         const detail = eventId ? await loadPublicEventDetail(env, eventId) : null;
-        if (!detail || !eventId) return new Response(t(locale, "notFound"), { status: 404 });
+        if (!detail || !eventId) {
+          // Duplicates folded into another incident keep their URL as a redirect.
+          const merged = eventId ? await mergedEventRedirect(env, eventId, publicOrigin) : null;
+          return merged ?? new Response(t(locale, "notFound"), { status: 404 });
+        }
         const redirectTo = eventCanonicalRedirect(url.pathname, detail.item.url);
         if (redirectTo) return Response.redirect(new URL(redirectTo + url.search, publicOrigin).toString(), 301);
         const liveProfile = resolveOperatorProfile({

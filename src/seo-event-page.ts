@@ -95,10 +95,13 @@ function statusLine(detail: PublicEventDetail, locale: AppLocale = "de"): string
       return [
         t(locale, "status.autoClosed"),
         item.last_confirmed_active_at ? t(locale, "event.statusLine.lastConfirm", { date: formatDate(item.last_confirmed_active_at, locale) }) : null,
-        t(locale, "event.statusLine.durationUnknown")
+        item.duration_is_estimate && formatDuration(item.duration_minutes, locale)
+          ? t(locale, "event.statusLine.lasted", { duration: `≈ ${formatDuration(item.duration_minutes, locale)}` })
+          : t(locale, "event.statusLine.durationUnknown")
       ].filter(Boolean).join(" · ");
     }
-    const duration = formatDuration(item.duration_minutes, locale);
+    const rawDuration = formatDuration(item.duration_minutes, locale);
+    const duration = rawDuration && item.duration_is_estimate ? `≈ ${rawDuration}` : rawDuration;
     return [
       item.resolved_at ? t(locale, "status.resolved") : t(locale, "status.resolvedReported"),
       duration ? t(locale, "event.statusLine.lasted", { duration }) : null,
@@ -507,7 +510,13 @@ function renderFacts(detail: PublicEventDetail, locale: AppLocale, now: number, 
   const plannedEnd = toMs(item.expected_restore_at);
   const rows: Array<[string, string, string?]> = [];
 
-  rows.push([f("start"), start !== null ? whenText(start, now, locale) : f("unknown"), start === null ? "is-open" : undefined]);
+  // "≤": an operator outage without a reported start began no later than its first sighting.
+  const firstSeen = item.active_since_is_minimum ? toMs(item.active_since_at) : null;
+  rows.push(start !== null
+    ? [f("start"), whenText(start, now, locale)]
+    : firstSeen !== null
+      ? [f("start"), `≤ ${whenText(firstSeen, now, locale)}`]
+      : [f("start"), f("unknown"), "is-open"]);
 
   if (item.status === "active" || item.status === "upcoming") {
     rows.push(plannedEnd !== null
@@ -515,11 +524,15 @@ function renderFacts(detail: PublicEventDetail, locale: AppLocale, now: number, 
       : [f("end"), f("open"), "is-open"]);
   } else if (resolved !== null) {
     rows.push([f("end"), whenText(resolved, now, locale)]);
+  } else if (item.status === "resolved" && toMs(item.resolution_latest_at) !== null) {
+    // Measured end window: gone from the operator listing no later than this poll.
+    rows.push([f("end"), `≤ ${whenText(toMs(item.resolution_latest_at) as number, now, locale)}`]);
   } else {
     rows.push([f("end"), item.status === "resolved" && !isAutoClosed(detail) ? t(locale, "event.answers.resolvedTimeUnknown") : f("unknown"), "is-open"]);
   }
 
-  const duration = formatDuration(item.duration_minutes, locale);
+  const rawDuration = formatDuration(item.duration_minutes, locale);
+  const duration = rawDuration && item.duration_is_estimate ? `≈ ${rawDuration}` : rawDuration;
   if (duration && item.status !== "active" && item.status !== "upcoming") rows.push([f("duration"), duration]);
   if (item.status === "upcoming" && start !== null && plannedEnd !== null && plannedEnd > start) {
     rows.push([f("duration"), formatDuration(Math.round((plannedEnd - start) / 60_000), locale) ?? ""]);

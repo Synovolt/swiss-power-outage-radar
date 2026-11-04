@@ -193,6 +193,13 @@ export interface OutageEvent {
   resolution_earliest_at?: string | null;
   resolution_latest_at?: string | null;
   time_confidence?: TimeConfidence | null;
+  /** media: press/Google-Alert pipeline; operator: derived from source_records. */
+  origin?: "media" | "operator";
+  source_registry_id?: number | null;
+  /** Earliest possible start when the operator gives none (last poll without it). */
+  start_earliest_at?: string | null;
+  record_count?: number;
+  quality_flags?: string;
   summary: string | null;
   reason: string | null;
   confidence: number;
@@ -277,6 +284,10 @@ export interface PublicFeedItem {
   resolution_earliest_at?: string | null;
   resolution_latest_at?: string | null;
   time_confidence?: TimeConfidence;
+  /** Earliest possible start when only the first sighting is known (active_since_at is the latest). */
+  start_earliest_at?: string | null;
+  /** duration_minutes is estimated from observation windows, not reported. */
+  duration_is_estimate?: boolean;
   cause: string | null;
   affected_area: string | null;
   updated_at: string;

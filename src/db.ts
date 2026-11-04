@@ -515,6 +515,7 @@ export async function getLinkedRelevantItemsNeedingCandidate(
       `SELECT ai.*
        FROM alert_items ai
        WHERE ai.outage_event_id IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM outage_events e WHERE e.id = ai.outage_event_id AND e.origin = 'operator')
          AND ai.is_relevant = 1
          AND ai.confidence >= 0.65
          AND ai.country IN ('CH', 'unknown')
@@ -555,7 +556,7 @@ export async function findCandidateEvents(
     .prepare(
       `SELECT *
        FROM outage_events
-       WHERE status != 'dismissed'
+       WHERE status != 'dismissed' AND origin != 'operator'
          AND country = 'CH'
          AND last_seen_at >= ?
        ORDER BY COALESCE(started_at_estimate, first_seen_at, last_seen_at) DESC
@@ -738,7 +739,7 @@ export async function getHistoricalBackfillTargets(
        LIMIT 1
      )
      WHERE event.country = 'CH'
-       AND event.status != 'dismissed'
+       AND event.status != 'dismissed' AND event.origin != 'operator'
        AND COALESCE(event.received_at, event.first_seen_at) < ?
        AND NOT EXISTS (
          SELECT 1 FROM outage_facts fact
@@ -1819,7 +1820,7 @@ export async function getEventsForPublicationRevalidation(
   const result = await db
     .prepare(
       `SELECT * FROM outage_events
-       WHERE status != 'dismissed' AND country = 'CH'
+       WHERE status != 'dismissed' AND country = 'CH' AND origin != 'operator'
        ORDER BY COALESCE(received_at, created_at, first_seen_at) DESC
        LIMIT ?`
     )
@@ -2050,7 +2051,7 @@ export async function getUnplannedEventsDueForResearchRefresh(
      INNER JOIN publication_decisions decision ON decision.outage_event_id = event.id
      WHERE decision.publishable = 1
        AND event.country = 'CH'
-       AND event.status NOT IN ('dismissed', 'resolved')
+       AND event.status NOT IN ('dismissed', 'resolved') AND event.origin != 'operator'
        AND event.outage_nature = 'unplanned'
        AND COALESCE(event.started_at_estimate, event.received_at, event.first_seen_at) >= ?
        AND COALESCE(event.research_status, 'not_started') != 'running'
@@ -2596,7 +2597,7 @@ export async function getPendingOutageEventEmails(db: D1Database): Promise<Outag
       `SELECT *
        FROM outage_events
        WHERE email_sent = 0
-         AND status != 'dismissed'
+         AND status != 'dismissed' AND origin != 'operator'
          AND (
            COALESCE(event_score, 0) >= 80
            OR (COALESCE(event_score, 0) >= 70 AND evidence_level = 'official')
@@ -2616,7 +2617,7 @@ export async function getEventsNeedingIntelligence(
     .prepare(
       `SELECT *
        FROM outage_events
-       WHERE status != 'dismissed'
+       WHERE status != 'dismissed' AND origin != 'operator'
          AND (
            COALESCE(event_score, 0) = 0
            OR fact_sheet_json IS NULL
