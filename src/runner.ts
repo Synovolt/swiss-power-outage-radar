@@ -808,6 +808,13 @@ async function collectRegistrySources(env: Env): Promise<{
     }
   }
 
+  // Poll log retention: once a day, keep 60 days (records and R2 keep the history).
+  const clock = new Date();
+  if (clock.getUTCHours() === 3 && clock.getUTCMinutes() < 15) {
+    const cutoff = new Date(clock.getTime() - 60 * 24 * 60 * 60 * 1000).toISOString();
+    await env.DB.prepare("DELETE FROM source_polls WHERE polled_at < ?").bind(cutoff).run();
+  }
+
   return summary;
 }
 
