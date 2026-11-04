@@ -23,6 +23,7 @@ import { operatorBySlug, resolveOperatorProfile, type OperatorLiveStats } from "
 import { renderSeoEventAsset } from "./seo-event-page";
 import { renderHomeSeoAsset } from "./seo-home";
 import { edgeCacheKey, forEdgeCache, restoreBrowserCaching } from "./edge-cache";
+import { unavailableResponse } from "./outage-fallback";
 import {
   loadOperatorLive,
   operatorSitemapLastmods,
@@ -224,7 +225,7 @@ async function mergedEventRedirect(env: Env, eventId: number, origin: string): P
   return target ? Response.redirect(new URL(target.item.url, origin).toString(), 301) : null;
 }
 
-export default {
+const app = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const forcedHttps = httpsRedirect(request);
     if (forcedHttps) return forcedHttps;
@@ -706,4 +707,17 @@ export default {
       runAlertCheck(env).then((result) => console.log(JSON.stringify({ cron: event.cron, ...result })))
     );
   }
+};
+
+export default {
+  /** Any uncaught failure (e.g. D1's daily read limit) answers 503 with a usable page instead of error 1101. */
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    try {
+      return await app.fetch(request, env, ctx);
+    } catch (error) {
+      console.error(JSON.stringify({ unavailable: request.url, error: error instanceof Error ? error.message : String(error) }));
+      return unavailableResponse(request, error);
+    }
+  },
+  scheduled: app.scheduled
 };
