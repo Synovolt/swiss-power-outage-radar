@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { derivePublicPlaces } from "../src/public-places";
-import { buildStatsPage } from "../src/seo-data-pages";
+import { buildPlacePage, buildStatsPage } from "../src/seo-data-pages";
 import { computePublicStats } from "../src/public-stats";
 import { cantonByName } from "../src/swiss-cantons";
 import { decodeFeedCursor, encodeFeedCursor, stableItemKey } from "../src/public-projection";
@@ -77,5 +77,29 @@ describe("regressions found in review", () => {
     expect(home.partial).toBe(true);
     expect(home.items.map((item) => item[0])).toEqual([1, 2, 3]);
     expect(home.counts).toEqual({ now: 3, planned: 1, history: 3 });
+  });
+
+  it("counts 'since' from the first observation, not from an archived report date", () => {
+    const now = Date.parse("2026-11-04T12:00:00Z");
+    const row = (id: number, sortAt: string, receivedAt: string) => ({
+      event_id: id, status: "resolved", nature: "unplanned", trust: "official", location: "Ort", canton: "BE",
+      operator_slug: null, publisher: "BKW", received_at: receivedAt, started_at: sortAt, resolved_at: null,
+      expected_restore_at: null, duration_minutes: null, sort_bucket: 1, sort_at: sortAt, latitude: null,
+      longitude: null, places_key: "", source_updated_at: receivedAt, end_earliest_at: null, end_latest_at: null,
+      active_since_at: null, time_confidence: "reported"
+    });
+    const stats = computePublicStats([
+      row(1, "2008-08-24T00:00:00.000Z", "2026-08-20T10:00:00.000Z"),
+      row(2, "2026-07-01T00:00:00.000Z", "2026-07-01T06:00:00.000Z")
+    ] as never, { now });
+    expect(stats.firstAt).toBe("2026-07-01T06:00:00.000Z");
+  });
+
+  it("does not repeat the canton when it is named like the place", () => {
+    const slice = { total: 3, active: 0, upcoming: 0, resolved: 3, planned: 1, unplanned: 2, last30Days: 1, lastAt: "2026-11-01T00:00:00.000Z", firstAt: "2026-08-19T00:00:00.000Z", medianDurationMinutes: null, knownDurations: 0 };
+    const luzern = buildPlacePage({ slug: "luzern-lu", name: "Luzern", canton: "LU", slice, items: [], nearby: [], generatedAt: "2026-11-04T12:00:00.000Z" }, "de");
+    expect(luzern.html).not.toContain("Luzern (Luzern)");
+    const brugg = buildPlacePage({ slug: "brugg-ag", name: "Brugg", canton: "AG", slice, items: [], nearby: [], generatedAt: "2026-11-04T12:00:00.000Z" }, "de");
+    expect(brugg.html).toContain("Brugg (Aargau)");
   });
 });
