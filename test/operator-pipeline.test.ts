@@ -108,6 +108,11 @@ describe("operator record extraction", () => {
       ["Seewen", "unplanned", "resolved", true]
     ]);
     expect(records[0].detailText).toBe("Fläschackerstrasse");
+    // Primeo files announced works under "done" before they happen.
+    const upcoming = extractPrimeoRecords({ current: [], done: [
+      { status: "PLANNED", title: "Hochwald ( Stelzenweg )", from: "2026-11-04T12:15:00.000Z", to: "2026-11-04T14:00:00.000Z" }
+    ] }, T0).records[0];
+    expect(upcoming.operatorState).toBe("scheduled");
   });
 
   it("uses operator uuids for Romande and SAK", () => {

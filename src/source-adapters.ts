@@ -711,7 +711,8 @@ async function parseEwlHtml(
       location,
       observedAt,
       startedAt: range.startedAt,
-      resolvedAt: resolved ? range.resolvedAt : null,
+      // For announced works the range end is the planned end (records keep it as reported_end_at).
+      resolvedAt: resolved || planned ? range.resolvedAt : null,
       raw: { adapter: "ewl-disturbances", excerpt: rowText.slice(0, 2000) }
     }));
   }

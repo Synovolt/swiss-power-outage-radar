@@ -240,10 +240,16 @@ export function extractPrimeoRecords(payload: unknown, observedAt: string): Reco
       const end = isoOrNull(row.to);
       const planned = row.status === "PLANNED";
       const { place, detail } = splitPlaceDetail(row.title);
-      const operatorState: OperatorState = isDone || row.status === "RESOLVED"
-        ? "resolved"
-        : planned && start && Date.parse(start) > now
+      // Primeo files announced works under "done" before they happen, so a
+      // planned item's state comes from its window, not from the list.
+      const operatorState: OperatorState = planned
+        ? start && Date.parse(start) > now
           ? "scheduled"
+          : end && Date.parse(end) <= now
+            ? "resolved"
+            : "active"
+        : isDone || row.status === "RESOLVED"
+          ? "resolved"
           : "active";
       records.push({
         baseKey: `primeo:${keyText(place)}:${keyText(detail)}:${start ?? "open"}`,
