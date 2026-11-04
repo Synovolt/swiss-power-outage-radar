@@ -163,6 +163,7 @@ export const SOURCE_REGISTRY_SEEDS: SourceRegistrySeed[] = [
     area_text: "Repower Netzgebiet in Graubünden und angrenzenden Regionen",
     trust_level: "official",
     check_interval_minutes: 10,
+    priority: 82,
     firecrawl_enabled: 0,
     adapter_config: { language: "de", status_mode: "operator_api", api_url: "https://www.repower.com/umbraco/api/Stoerung/GetWarnings?culture=de", utility_filter: "electricity_only", no_outage_terms: commonNoOutageTerms, historical_terms: ["vergangene störungen"] }
   },
