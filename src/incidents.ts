@@ -284,8 +284,16 @@ export function deriveIncident(records: StoredRecord[], source: IncidentSource):
   const startExact = earliestStart.exact;
   if (!startExact) qualityFlags.add("start_observed");
 
-  // End: only when every record has ended; the latest record end.
-  const ends = records.map(recordEnd);
+  // End: only when every record has ended; the latest record end. Rebuilt
+  // history sometimes lacks the end of a single trafo inside a multi-trafo
+  // incident; then the other records' ends stand for the incident.
+  let ends = records.map(recordEnd);
+  const knownEnds = ends.filter((end): end is TimeWindow => end !== null);
+  const unknownAreBackfill = records.every((record, index) => ends[index] !== null || parseFlags(record.quality_flags).includes("backfill"));
+  if (!open && knownEnds.length > 0 && knownEnds.length < ends.length && unknownAreBackfill) {
+    ends = knownEnds;
+    qualityFlags.add("end_partial");
+  }
   const allEnded = !open;
   let resolvedAt: string | null = null;
   let resolutionEarliestAt: string | null = null;

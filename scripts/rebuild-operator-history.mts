@@ -52,7 +52,8 @@ const all = <T>(sql: string, ...params: Array<string | number | null>): T[] => d
 const MAX_PLAUSIBLE_UNPLANNED_MS = 48 * 60 * 60 * 1000;
 /** Records seen this close to the dump are still listed: the cron continues them. */
 const LISTED_GRACE_MS = 40 * 60 * 1000;
-const EPISODE_GAP_MS = 45 * 60 * 1000;
+/** Without any recorded end, sightings further apart than this are separate episodes. */
+const UNEVIDENCED_EPISODE_GAP_MS = 6 * 60 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // 0. Schema: bring the copy to the target migrations.
@@ -196,6 +197,28 @@ function recordsOf(observation: ObservationRow): OperatorRecordInput[] {
   }
 }
 
+const presence = new Map<string, { last: number; missing: number }>();
+for (const row of all<{ outage_event_id: number; source_registry_id: number; last_confirmed_at: string; first_missing_at: string | null }>(
+  "SELECT outage_event_id, source_registry_id, last_confirmed_at, first_missing_at FROM outage_event_source_presence"
+)) {
+  presence.set(`${row.outage_event_id}|${row.source_registry_id}`, {
+    last: Date.parse(row.last_confirmed_at),
+    missing: row.first_missing_at ? Date.parse(row.first_missing_at) : NaN
+  });
+}
+interface OldEvent {
+  id: number;
+  status: string;
+  public_status: string | null;
+  last_confirmed_active_at: string | null;
+  resolution_latest_at: string | null;
+  location_text: string | null;
+  origin: string;
+}
+const oldEvents = new Map(all<OldEvent>(
+  "SELECT id, status, public_status, last_confirmed_active_at, resolution_latest_at, location_text, origin FROM outage_events"
+).map((row) => [row.id, row]));
+
 interface Draft {
   sourceId: number;
   input: OperatorRecordInput;
@@ -220,9 +243,18 @@ for (const observation of observations) {
     let draft = openByKey.get(key);
     if (draft && !input.stableIdentity) {
       // An unstable identity continues only within the same old event or a short gap.
+      // Old observations exist only where the listing changed, so a gap between
+      // them is no evidence of an end. A new episode starts only after an end
+      // the old cron did record (presence first_missing / resolution window).
       const sameEvent = observation.outage_event_id !== null && draft.eventIds.has(observation.outage_event_id);
       const lastSeen = Math.max(...draft.sightings);
-      if (!sameEvent && at - lastSeen > EPISODE_GAP_MS) draft = undefined;
+      const endEvidence = Math.min(...[...draft.eventIds].map((eventId) => {
+        const seen = presence.get(`${eventId}|${observation.source_registry_id}`);
+        const missing = Number.isFinite(seen?.missing ?? NaN) ? (seen?.missing as number) : Date.parse(oldEvents.get(eventId)?.resolution_latest_at ?? "");
+        return Number.isFinite(missing) && missing >= lastSeen ? missing : Number.POSITIVE_INFINITY;
+      }));
+      const continues = sameEvent || (Number.isFinite(endEvidence) ? at < endEvidence : at - lastSeen <= UNEVIDENCED_EPISODE_GAP_MS);
+      if (!continues) draft = undefined;
     }
     if (!draft) {
       draft = {
@@ -254,27 +286,6 @@ console.log(`${drafts.length} records from ${observations.length - unparsed} par
 // ---------------------------------------------------------------------------
 // 2. Sightings → windows, using the event-level presence the old cron kept.
 // ---------------------------------------------------------------------------
-const presence = new Map<string, { last: number; missing: number }>();
-for (const row of all<{ outage_event_id: number; source_registry_id: number; last_confirmed_at: string; first_missing_at: string | null }>(
-  "SELECT outage_event_id, source_registry_id, last_confirmed_at, first_missing_at FROM outage_event_source_presence"
-)) {
-  presence.set(`${row.outage_event_id}|${row.source_registry_id}`, {
-    last: Date.parse(row.last_confirmed_at),
-    missing: row.first_missing_at ? Date.parse(row.first_missing_at) : NaN
-  });
-}
-interface OldEvent {
-  id: number;
-  status: string;
-  public_status: string | null;
-  last_confirmed_active_at: string | null;
-  resolution_latest_at: string | null;
-  location_text: string | null;
-  origin: string;
-}
-const oldEvents = new Map(all<OldEvent>(
-  "SELECT id, status, public_status, last_confirmed_active_at, resolution_latest_at, location_text, origin FROM outage_events"
-).map((row) => [row.id, row]));
 const publicIds = new Set(all<{ event_id: number }>("SELECT event_id FROM public_events").map((row) => row.event_id));
 
 const iso = (value: number) => new Date(value).toISOString();

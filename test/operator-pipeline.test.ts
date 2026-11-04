@@ -140,6 +140,8 @@ describe("operator record extraction", () => {
     expect(isNonElectricNotice("Inbetriebnahme Fernwärme WDL Lampenberg. Zeitraum: 02.10.2026 Art: geplant Sparte: Fernwärme")).toBe(true);
     expect(isNonElectricNotice("Stromunterbruch Lampenberg. Sparte: Strom")).toBe(false);
     expect(isNonElectricNotice("Geplanter Stromunterbruch wegen Arbeiten an der Wasserleitung")).toBe(false);
+    expect(isNonElectricNotice("In einigen Teilen unseres Netzes kommt es zu Ausfällen der Strassen- und Quartierbeleuchtung.")).toBe(true);
+    expect(isNonElectricNotice("Stromausfall in Aesch, auch die Strassenbeleuchtung ist betroffen")).toBe(false);
   });
 
   it("gives item adapters an identity that survives the status change", () => {

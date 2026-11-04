@@ -19,6 +19,28 @@ Rund 95 % der öffentlichen Meldungen stammen von sechs Betreiberquellen (BKW 48
 | Offizielle Meldungen versteckt | 21 von 28 Primeo- und 5 von 7 SAK-Ausfällen | Ein «behoben»-Eintrag neben dem «aktiv»-Eintrag galt als `contradictory_evidence`. Ortstexte wie «Behobener Stromausfall in Seewen» kamen dazu. |
 | Verlorene Historie | geplante Primeo-Arbeiten | Der Adapter verwarf die `done`-Liste mit Status `PLANNED`. |
 
+## Ergebnis des Neuaufbaus (Prod-Kopie vom 4. November 2026)
+
+Gemessen mit `scripts/data-quality-report.mts` nach lokaler Projektion mit dem Produktionscode:
+
+| Kennzahl | vorher | nachher |
+| --- | ---: | ---: |
+| Öffentliche Meldungen | 830 | 1056 |
+| mit Beginn (gemeldet oder erste Sichtung) | 62,5 % | 97,5 % |
+| abgeschlossen mit Dauer | 43,2 % | 81,0 % |
+| abgeschlossen ganz ohne Ende | 8,8 % | 15,4 % ¹ |
+| Duplikatpaare (gleicher Betreiber, Ort, Art, innert 6 h) | 380 | 30 ² |
+| falsches «erstmals gesehen» | 358 | 9 ³ |
+| Fernwärme/Wärme als Stromausfall | 8 | 0 |
+| Primeo öffentlich | 7 | 43 |
+| SAK öffentlich | 2 | 8 |
+
+1. Vorher wurde ein fehlendes Ende oft durch ein erfundenes ersetzt (z. B. ein Ende Wochen später nach gefalteten Wiederholungen). Jetzt steht «Ende unbekannt», wo die Altdaten es nicht belegen. Für neue Daten entfällt das: Jede Abfrage misst das Ende.
+2. Die verbleibenden Paare sind überwiegend echte Folge-Episoden (Trafo wieder in Betrieb, später erneut ausgefallen) oder verschiedene geplante Arbeiten im selben Ort am selben Tag.
+3. Die 9 verbleibenden stammen aus der Medienpipeline.
+
+102 alte Duplikat-Ereignisse leiten per 301 auf ihr Hauptereignis weiter, 821 von 1019 Betreiber-Ereignissen behalten ihre bisherige ID und URL.
+
 ## Prinzipien
 
 1. **Die Identität kommt vom Betreiber.** BKW-Trafonummer, Romande- und SAK-UUID, Primeo Titel + angekündigter Start. Nie aus abgeleitetem Text.

@@ -171,7 +171,7 @@ export function extractSakRecords(payload: unknown, observedAt: string): RecordE
   const matching = rows.filter((row) =>
     typeof row.id === "string" && typeof row.title === "string" &&
     typeof row.status === "number" && typeof row.category === "number" && typeof row.start_date === "string"
-  );
+  ).filter((row) => !isNonElectricNotice(`${compactText(row.title)}. ${compactText(row.description)}`));
   if (rows.length > 0 && matching.length === 0) return { schemaMatched: false, records: [] };
   const now = Date.parse(observedAt);
   return {
@@ -236,6 +236,7 @@ export function extractPrimeoRecords(payload: unknown, observedAt: string): Reco
     for (const row of list.map(recordOf)) {
       seen += 1;
       if (typeof row.status !== "string" || !statuses.has(row.status) || typeof row.title !== "string") continue;
+      if (isNonElectricNotice(row.title)) continue;
       const start = isoOrNull(row.from);
       const end = isoOrNull(row.to);
       const planned = row.status === "PLANNED";
@@ -382,7 +383,8 @@ export function geojsonPointCentroid(geojson: unknown): { latitude: number; long
 // "in Arbeit" to "abgeschlossen".
 // ---------------------------------------------------------------------------
 const POWER_WORDS = /\b(?:strom|elektri|electri|courant|corrente|energia elettrica|netzst[oö]rung|stromnetz)\w*/i;
-const NON_POWER_WORDS = /\b(?:fernw[aä]rme\w*|w[aä]rmeverbund|w[aä]rmeversorgung|w[aä]rmenetz\w*|wasserversorgung|trinkwasser|wasserleitung|abwasser|erdgas|gasversorgung|gasleitung|chauffage [aà] distance|eau potable|acqua potabile|teleriscaldamento|glasfaser|internet|tv)\b/i;
+// Street lighting is electric but not a supply outage.
+const NON_POWER_WORDS = /\b(?:\w*beleuchtung|[ée]clairage public|illuminazione pubblica|fernw[aä]rme\w*|w[aä]rmeverbund|w[aä]rmeversorgung|w[aä]rmenetz\w*|wasserversorgung|trinkwasser|wasserleitung|abwasser|erdgas|gasversorgung|gasleitung|chauffage [aà] distance|eau potable|acqua potabile|teleriscaldamento|glasfaser|internet|tv)\b/i;
 const SPARTE = /\b(?:sparte|branche|secteur|settore)\s*:\s*([\p{L} ]+)/iu;
 
 /** Utility filter: district heating, water or gas works are not power outages. */
