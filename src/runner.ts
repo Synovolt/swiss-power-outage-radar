@@ -54,7 +54,7 @@ import { canAutoMergeLocation, canCreateEvent, makeEventTitle, normalizeLocation
 import { normalizeSwissLocation } from "./geo";
 import { decideNewEventMail, decideUpdateMail } from "./intelligence";
 import { evaluatePublicEvent } from "./publication";
-import { backfillEventCantons, refreshPublicProjection } from "./public-projection";
+import { backfillEventCantons, refreshPublicProjection, resolveMissingPins } from "./public-projection";
 import { refreshPublicAggregates } from "./public-stats";
 
 /** Bounded per cron run so a backlog never blows the 10 ms CPU / subrequest budget. */
@@ -972,6 +972,17 @@ export async function runAlertCheck(env: Env): Promise<WorkflowRunSummary> {
   };
 
   try {
+    // Geo enrichment first: the free plan allows 50 external subrequests per
+    // invocation and the source fetches below can use most of them. Pins and
+    // cantons resolved here are published by the projection at the end of the run.
+    try {
+      const pins = await resolveMissingPins(env, { limit: LOCATION_LOOKUPS_PER_RUN });
+      const cantons = await backfillEventCantons(env, { limit: CANTON_LOOKUPS_PER_RUN });
+      summary.errors.push(...pins.errors, ...cantons.errors);
+    } catch (error) {
+      summary.errors.push(`geo enrichment: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
     const registry = await collectRegistrySources(env);
     summary.sourcesChecked = registry.sourcesChecked;
     summary.observationsSeen = registry.observationsSeen;
@@ -1062,11 +1073,8 @@ export async function runAlertCheck(env: Env): Promise<WorkflowRunSummary> {
 
     // Publish the run's outcome: one writer for every public page and statistic.
     try {
-      const cantons = await backfillEventCantons(env, { limit: CANTON_LOOKUPS_PER_RUN });
-      summary.errors.push(...cantons.errors);
       const projection = await refreshPublicProjection(env, {
         limit: PROJECTION_LIMIT_PER_RUN,
-        resolveLocations: LOCATION_LOOKUPS_PER_RUN,
         sweepOrphans: new Date().getUTCMinutes() < 15
       });
       summary.errors.push(...projection.errors);

@@ -131,6 +131,26 @@ describe("regressions found in review", () => {
     expect(statements[0].sql).toContain("canton IS NULL");
   });
 
+  it("does not store a miss when the canton lookup fails in transport", async () => {
+    const statements: Array<{ binds: unknown[] }> = [];
+    const db = {
+      prepare(sql: string) {
+        return { bind(...binds: unknown[]) { return { sql, binds, all: async () => ({ results: [{ event_id: 9, latitude: 46.16, longitude: 8.75 }] }) }; } };
+      },
+      batch: async (list: Array<{ binds: unknown[] }>) => { statements.push(...list); return []; }
+    } as unknown as D1Database;
+    const calls: unknown[] = [];
+    const lookup = async (_lat: number, _lon: number, options?: { throwOnError?: boolean }) => {
+      calls.push(options);
+      throw new Error("Too many subrequests");
+    };
+    const result = await backfillEventCantons({ DB: db }, { limit: 4, lookup });
+    expect(calls).toEqual([{ throwOnError: true }]);
+    expect(result.filled).toBe(0);
+    expect(result.errors[0]).toContain("Too many subrequests");
+    expect(statements).toEqual([]);
+  });
+
   it("treats an empty stored canton (a failed lookup) as unknown", () => {
     expect(derivePublicPlaces({ location: "Someo", eventCanton: "" }).canton).toBeNull();
     expect(derivePublicPlaces({ location: "Someo", eventCanton: "ti" }).canton).toBe("TI");

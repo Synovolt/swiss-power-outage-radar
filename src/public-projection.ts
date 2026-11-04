@@ -289,7 +289,8 @@ export async function backfillEventCantons(
   for (const row of rows) {
     result.checked += 1;
     try {
-      const found = await lookup(row.latitude, row.longitude);
+      // Throws on transport failure: only a real "no municipality here" is stored as "".
+      const found = await lookup(row.latitude, row.longitude, { throwOnError: true });
       const code = cantonByCode(found?.canton)?.code ?? cantonByName(found?.canton)?.code ?? "";
       if (code) result.filled += 1;
       statements.push(env.DB.prepare(
@@ -300,6 +301,41 @@ export async function backfillEventCantons(
     }
   }
   if (statements.length) await env.DB.batch(statements);
+  return result;
+}
+
+/**
+ * Resolves map pins for published events that still lack one (geo.admin
+ * search). Run at the start of a cron invocation, before the source fetches
+ * use up the external subrequest budget; resolved pins carry a fresh
+ * resolved_at, so the projection refresh of the same run picks them up.
+ */
+export async function resolveMissingPins(
+  env: Pick<Env, "DB">,
+  options: { limit?: number; now?: number } = {}
+): Promise<{ checked: number; resolved: number; errors: string[] }> {
+  const limit = Math.max(0, Math.min(25, Math.floor(options.limit ?? 3)));
+  const result = { checked: 0, resolved: 0, errors: [] as string[] };
+  if (limit === 0) return result;
+  const nowIso = new Date(options.now ?? Date.now()).toISOString();
+  const rows = (await env.DB.prepare(
+    `SELECT p.event_id AS id, event.location_text
+     FROM public_events p
+     INNER JOIN outage_events event ON event.id = p.event_id
+     LEFT JOIN event_public_location_misses miss
+       ON miss.outage_event_id = p.event_id AND miss.retry_after > ?
+     WHERE p.latitude IS NULL AND miss.outage_event_id IS NULL
+     ORDER BY p.event_id DESC
+     LIMIT ?`
+  ).bind(nowIso, limit).all<{ id: number; location_text: string | null }>()).results;
+  for (const row of rows) {
+    result.checked += 1;
+    try {
+      if (await resolvePublicEventLocation(env.DB, row)) result.resolved += 1;
+    } catch (error) {
+      result.errors.push(`pin ${row.id}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
   return result;
 }
 
