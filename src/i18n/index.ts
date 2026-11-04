@@ -1,7 +1,9 @@
 import i18next from "i18next";
 import { de, fr } from "./catalogs";
 import { en, it } from "./catalogs-it-en";
-import { DATE_LOCALE, type AppLocale } from "./locales";
+import { dataDe, dataEn, dataFr, dataIt } from "./catalog-data";
+import { DATE_LOCALE, EVENT_STEM, localePrefix, type AppLocale } from "./locales";
+import type { RadarCopy } from "../radar-view";
 
 const i18n = i18next.createInstance();
 
@@ -9,10 +11,10 @@ void i18n.init({
   lng: "de",
   fallbackLng: "de",
   resources: {
-    de: { translation: de },
-    fr: { translation: fr },
-    it: { translation: it },
-    en: { translation: en }
+    de: { translation: { ...de, data: dataDe } },
+    fr: { translation: { ...fr, data: dataFr } },
+    it: { translation: { ...it, data: dataIt } },
+    en: { translation: { ...en, data: dataEn } }
   },
   interpolation: { escapeValue: false },
   returnNull: false,
@@ -50,6 +52,59 @@ export function formatAppDuration(minutes: number | null, locale: AppLocale): st
   return rest
     ? t(locale, "time.hoursMinutes", { hours, minutes: rest })
     : t(locale, "time.hours", { count: hours });
+}
+
+/** Copy for the shared radar list renderer (src/radar-view.ts). */
+export function radarViewCopy(locale: AppLocale): RadarCopy {
+  const r = (key: string, options?: Record<string, unknown>) => t(locale, `data.radar.${key}`, options);
+  return {
+    locale,
+    dateLocale: DATE_LOCALE[locale],
+    eventStem: EVENT_STEM[locale],
+    localePrefix: localePrefix(locale),
+    status: {
+      upcoming: t(locale, "status.upcoming"),
+      active: t(locale, "status.activeShort"),
+      resolved: t(locale, "status.resolved"),
+      stale: t(locale, "status.staleShort"),
+      historical: t(locale, "status.historicalShort"),
+      unknown: t(locale, "status.unknown")
+    },
+    nature: {
+      planned: t(locale, "nature.planned"),
+      unplanned: t(locale, "nature.unplanned"),
+      unknown: t(locale, "nature.unknown")
+    },
+    views: { now: r("views.now"), planned: r("views.planned"), history: r("views.history") },
+    natureAll: r("natureAll"),
+    groups: {
+      active: r("groups.active"),
+      next7: r("groups.next7"),
+      recent: r("groups.recent"),
+      today: r("groups.today"),
+      tomorrow: r("groups.tomorrow"),
+      results: r("groups.results"),
+      later: r("groups.later")
+    },
+    time: {
+      since: r("time.since", { relative: "{{relative}}" }),
+      reported: r("time.reported", { relative: "{{relative}}" }),
+      endedAt: r("time.endedAt", { date: "{{date}}" }),
+      window: r("time.window", { start: "{{start}}", end: "{{end}}" }),
+      lasted: r("time.lasted", { duration: "{{duration}}" })
+    },
+    countOne: r("count", { count: 1 }).replace("1", "{{count}}"),
+    countOther: r("count", { count: 2 }).replace("2", "{{count}}"),
+    empty: {
+      now: r("emptyNow"),
+      planned: r("emptyPlanned"),
+      history: r("emptyHistory"),
+      query: r("emptyQuery", { query: "{{query}}" })
+    },
+    showMore: r("showMore", { count: "{{count}}" }),
+    asOf: t(locale, "home.asOf", { date: "{{date}}" }),
+    openReport: t(locale, "home.openReport")
+  };
 }
 
 export function radarCopy(locale: AppLocale) {
@@ -94,7 +149,10 @@ export function radarCopy(locale: AppLocale) {
 export { APP_LOCALES, DATE_LOCALE, DEFAULT_LOCALE, EVENT_STEM, EVENT_STEMS, HREFLANG, HTML_LANG, OG_LOCALE, PREFIX_LOCALES, isAppLocale, isPrefixLocale, localeFromParam, localeParam, localePrefix, localeStaticPaths, type AppLocale, type PrefixLocale } from "./locales";
 export {
   HELP_GUIDE_PATH,
+  CANTON_STEM,
+  STATS_STEM,
   alternatePath,
+  canonicalRoutePath,
   canonicalEventPath,
   dateLocale,
   dePrefixTarget,
@@ -103,10 +161,12 @@ export {
   eventsTemplateTarget,
   eventStemFromPath,
   hreflangEntries,
+  localizeRoute,
   localizeStoredEventUrl,
   parseAppPath,
   parseLocaleFromPath,
   pathFor,
   stripLocalePrefix,
+  templateShellTarget,
   type AppRoute
 } from "./routes";

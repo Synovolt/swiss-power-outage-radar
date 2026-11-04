@@ -10,9 +10,35 @@ Die Übersicht zeigt Art, Status, Beginn, Ende, Dauer, Ursache und betroffene Re
 
 Ungeplante, noch aktive Ereignisse werden inkrementell aktualisiert: frühestens alle sechs Stunden, höchstens ein Ereignis pro Cron-Lauf und höchstens acht Recherchen pro Tag. Quellenabfragen, Geocoding und öffentliche Antworten sind zusätzlich gecacht.
 
+## Öffentliche Projektion, Statistik und Orts-Seiten
+
+Der öffentliche Zustand eines Ereignisses (Status, Beginn, Ende, Vertrauen, Kanton, Orte, Betreiber) wird genau an einer Stelle berechnet: `toPublicFeedItem()` in `src/publication.ts`. `src/public-projection.ts` materialisiert das Ergebnis in `public_events` und `public_event_places` (Migration `0020_public_projection.sql`). Alle öffentlichen Seiten, die APIs, die Sitemap und die Statistik lesen nur diese Projektion. Dadurch zeigen Startseite, Detailseite, Betreiber-, Orts- und Statistikseiten immer dieselben Zahlen.
+
+- Der Cron findet Kandidaten über indexierte Abfragen «geändert seit Watermark» (Event, Publikationsentscheid, Kartenpunkt) plus die zeitabhängigen Zeilen (bevorstehend/aktiv). Er verarbeitet höchstens 60 Zeilen pro Lauf und schreibt nur echte Änderungen. Ein routinemässiges «weiterhin gelistet» zählt nicht als Änderung: `last_confirmed_active_at` wird höchstens stündlich neu geschrieben.
+- Fehlende Kartenpunkte werden mit höchstens 3 geo.admin-Abfragen pro Lauf nachgeholt.
+- `src/public-stats.ts` legt den kompakten Such-/Kartenindex, eine kleine «Jetzt»-Teilmenge für die Startseite, die Ortsliste, die Betreiber-Kennzahlen und die nationale Statistik als je eine Zeile in `public_stats_cache` ab. Index, Teilmenge und Ortsliste folgen jeder Änderung. Statistik und Betreiber-Kennzahlen werden höchstens stündlich neu berechnet, und nie im selben Lauf wie der Index (ausser sie sind älter als drei Stunden).
+- Geplante Unterbrüche gelten nach Ablauf des angekündigten Zeitfensters als beendet (Ende = angekündigtes Ende), solange die Quelle sie nicht weiter bestätigt.
+- Automatisch geschlossene Ausfälle behalten ihr Ende-Zeitfenster (`resolution_earliest_at` = zuletzt bestätigt, `resolution_latest_at` = erste Abfrage ohne Meldung). Die Statistik schätzt die Dauer aus der Mitte dieses Fensters und weist exakte und geschätzte Werte getrennt aus.
+
+Neue öffentliche Seiten (alle vier Sprachen, eigene hreflang, Breadcrumb- und JSON-LD-Daten):
+
+- `/statistik/` (`/fr/statistiques/`, `/it/statistiche/`, `/en/statistics/`): Kennzahlen, Wochenverlauf, Wochentag × Stunde, Vorlauf, Dauer, Betreiber, Kantone, Orte. Serverseitige SVG-Diagramme ohne Client-JavaScript, `Dataset`-JSON-LD.
+- `/stromausfall/`: alle Orte nach Kanton.
+- `/stromausfall/<ort>-<kanton>`, z. B. `/stromausfall/brugg-ag`: Live-Status, Verlauf, FAQ und Nachbarorte. Der Kanton im Slug trennt gleichnamige Gemeinden (Buchs AG/SG/ZH). Indexiert ab 2 Ereignissen oder einer Meldung in den letzten 90 Tagen.
+- `/stromausfall/kanton/<kanton>` mit lokalisierten Slugs (`/fr/panne-de-courant/canton/vaud`).
+
+Die Startseite rendert die aktuelle Liste serverseitig (sichtbar, crawlbar) und bettet nur die «Jetzt»-Teilmenge mit vorberechneten Zählern ein. Den vollständigen Index (`/api/public/index.json`, 365 Tage) lädt der Browser im Leerlauf oder sobald gesucht bzw. die Ansicht gewechselt wird. Suche und Filter laufen dann über alle öffentlichen Meldungen, nicht nur über die erste Seite.
+
 ## Cloudflare Free Tier
 
 Dieses Projekt bindet weder Durable Objects noch Cloudflare Workflows. Der frühere Workflow-Wrapper wurde entfernt; Cron und manueller Lauf rufen den idempotenten Worker direkt auf. Ein atomarer D1-Lock verhindert überlappende Läufe. Damit kann dieses Projekt keine Durable-Objects-Requests mehr erzeugen. Bei einer weiteren Durable-Objects-Warnung muss im Cloudflare-Dashboard nach anderen Workern, alten Deployments oder Apps im selben Account gesucht werden.
+
+Budget-Regeln für öffentliche Seiten (Free Plan: 10 ms CPU pro Request, 50 externe Subrequests pro Aufruf, D1 5 Mio. gelesene und 100 000 geschriebene Zeilen pro Tag):
+
+- Teure Lesepfade gehen über eine vorberechnete Zeile in \`public_stats_cache\`: Startseite und Index, Statistik, Ortsliste und Betreiber-Kennzahlen. Ein Cache-Miss liest dann eine Zeile statt hunderter.
+- Orts- und Kantonsseiten lesen nur indexierte Ausschnitte (\`place_slug\`, \`canton\`). Die Betreiber-Übersicht und die Sitemap lesen Spalten statt JSON, damit kein Parsing von Hunderten Items im 10-ms-Budget nötig ist.
+- Antworten werden per Cache API an der Edge gecacht (60 s bis 10 min, \`stale-while-revalidate\`). \`PUBLIC_CACHE_VERSION\` in \`src/index.ts\` hochzählen, wenn sich Markup ändert.
+- Der Cron schreibt nur geänderte Projektionszeilen. Zeitabhängige Zeilen werden gelesen, aber nur bei Änderung geschrieben. Der Orphan-Sweep läuft stündlich.
 
 ## Setup
 
@@ -236,6 +262,14 @@ npm run db:migrate:remote
 npm run deploy
 ```
 
+Nach einem Deploy, der die Projektion einführt oder ihre Logik ändert, diese sofort vollständig neu aufbauen. Der Aufruf ist paginiert: mit dem zurückgegebenen `projection.nextBeforeId` als `before_id` wiederholen, bis er `null` ist. Bis dahin liefern Detailseite und `/api/public/events` über einen Fallback weiterhin Daten.
+
+```bash
+curl -X POST https://outage.ch/admin/projection/rebuild   -H "Authorization: Bearer <ADMIN_TOKEN>"   -H "Content-Type: application/json"   -d '{"full":true,"limit":80}'
+```
+
+Danach einmal ohne `full` und mit `"force_stats":true` aufrufen. Das setzt die Watermark für die inkrementellen Läufe und berechnet die Statistik.
+
 Nach dem Deployment:
 
 ```bash
@@ -247,8 +281,14 @@ Danach die Worker-URL öffnen und die Statusseite prüfen. Der Cron Trigger `*/1
 
 ## Endpunkte
 
-- `GET /` öffentliche HTML-Statusseite ohne Secrets und ohne Feed-URLs, mit letzten Event-Akten
-- `GET /events/:id` öffentliche Event-Akte mit Quellenliste
+- `GET /` Radar mit Karte, serverseitig gerenderter Liste und eingebettetem Index
+- `GET /stromausfall/<ort>-<id>` öffentliche Event-Akte; `/events/:id` leitet dorthin um
+- `GET /statistik/`, `/stromausfall/`, `/stromausfall/<ort>`, `/stromausfall/kanton/<kanton>` Datenseiten (siehe oben)
+- `GET /api/public/index.json` kompakter Index aller öffentlichen Meldungen (365 Tage) für Suche und Karte
+- `GET /api/public/stats.json` nationale Statistik als JSON (CORS offen)
+- `GET /api/public/events` paginierter Feed (`limit`, `before`)
+- `GET /admin/status-page` geschützte interne Betriebsübersicht
+- `POST /admin/projection/rebuild` geschützter, begrenzter Neuaufbau der öffentlichen Projektion
 - `GET /status` geschützter JSON-Debugstatus
 - `POST /run` geschützter manueller Workflow-Start
 - `GET /recent` geschützte letzte 20 Items

@@ -1,6 +1,7 @@
 import { canonicalSourceUrl, classifySource } from "./intelligence";
 import { normalizePlaceText } from "./places";
 import { getOutageEvent, getOutageEventFacts, getOutageEventSnapshots, getOutageEventSources, getPublicFeedItem } from "./db";
+import { getPublicItem } from "./public-projection";
 import { evidenceScreenshotKey } from "./snapshots";
 import { operatorHostnames, operatorProfileUrl, resolveOperatorProfile } from "./operators";
 import type { Env, OutageEvent, OutageFact, OutageSource, PublicFeedItem, SourceSnapshot } from "./types";
@@ -587,7 +588,9 @@ export async function loadPublicEventDetail(
   env: Pick<Env, "DB" | "SNAPSHOTS">,
   eventId: number
 ): Promise<PublicEventDetail | null> {
-  const item = await getPublicFeedItem(env.DB, eventId);
+  // The projection is the source of truth; the legacy computation only bridges
+  // the minutes between a fresh deploy and the first projection refresh.
+  const item = await getPublicItem(env.DB, eventId) ?? await getPublicFeedItem(env.DB, eventId);
   if (!item) return null;
   const event = await getOutageEvent(env.DB, eventId);
   if (!event) return null;

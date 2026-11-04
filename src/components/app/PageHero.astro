@@ -1,6 +1,4 @@
 ---
-import { Separator } from "@/components/starwind/separator";
-
 interface Props {
   kicker: string;
   title: string;
@@ -20,68 +18,61 @@ const { kicker, title, lede } = Astro.props;
     </div>
   )}
 </header>
-<Separator class="mb-5" />
 
 <style>
   .page-hero {
-    margin-bottom: 0.85rem;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 1px solid var(--hairline);
   }
 
   .page-hero__kicker {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.3rem 0.62rem;
-    border-radius: 999px;
-    background: linear-gradient(to right, var(--muted), color-mix(in oklch, var(--muted) 50%, var(--card)));
-    border: 1px solid var(--border);
-    font-family: var(--font-mono);
-    font-size: 0.68rem;
-    font-weight: 600;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--muted-foreground);
+    display: block;
+    color: var(--text-muted);
+    font-size: 0.8125rem;
+    font-weight: 500;
   }
 
   .page-hero__title {
-    margin: 0.6rem 0 0;
-    max-width: 24ch;
-    font-family: var(--font-display);
-    font-size: clamp(1.5rem, 5.5vw, 2.25rem);
-    font-weight: 800;
-    letter-spacing: -0.035em;
-    line-height: 1.1;
+    margin: 0.35rem 0 0;
+    max-width: 26ch;
+    font-size: clamp(1.5rem, 4.6vw, 2.125rem);
+    font-weight: 600;
+    letter-spacing: -0.025em;
+    line-height: 1.12;
     text-wrap: balance;
-    color: var(--foreground);
+    color: var(--text);
   }
 
   .page-hero__lede {
-    margin: 0.55rem 0 0;
+    margin: 0.6rem 0 0;
     max-width: 42rem;
-    font-size: 0.92rem;
+    font-size: 0.9375rem;
     line-height: 1.55;
-    color: var(--muted-foreground);
+    color: var(--text-muted);
     text-wrap: pretty;
   }
 
   .page-hero__slot {
-    margin-top: 0.75rem;
+    margin-top: 1rem;
     max-width: 42rem;
     display: grid;
     gap: 0.6rem;
   }
 
   .page-hero__slot :global([data-slot="alert"]) {
-    padding: 0.75rem 0.9rem;
-    font-size: 0.88rem;
+    padding: 0.7rem 0.9rem;
+    font-size: 0.875rem;
     line-height: 1.5;
     border-radius: var(--radius);
-    background: linear-gradient(to bottom, var(--muted), color-mix(in oklch, var(--muted) 60%, var(--card)));
+    border-color: var(--hairline);
+    background: var(--surface-2);
+    color: var(--text);
   }
 
   @media (min-width: 640px) {
     .page-hero__lede {
-      font-size: 0.98rem;
+      font-size: 1rem;
     }
   }
 </style>

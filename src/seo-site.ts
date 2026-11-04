@@ -1,6 +1,7 @@
 import { SITE_ORIGIN, absoluteUrl, DEFAULT_OG_IMAGE_PATH, toSitemapLastmod } from "./public-url";
 import { knowledgeArticles, knowledgeArticleUrl } from "./knowledge";
 import { publicOperatorProfiles } from "./operators";
+import { cantonByCode, cantonSlug } from "./swiss-cantons";
 import {
   APP_LOCALES,
   HTML_LANG,
@@ -170,6 +171,9 @@ outage.ch sammelt öffentlich zugängliche Meldungen von Verteilnetzbetreibern, 
 - [Aktuelle Stromausfälle](${origin}/): Karte und Liste mit Status, Ort und Quellen
 - [Ratgeber](${origin}${GUIDES_HUB_PATH}): praktische Anleitungen für Haushalt und Betrieb
 - [Netzbetreiber](${origin}${OPERATORS_HUB_PATH}): beobachtete Verteilnetzbetreiber, offizielle Störungsseiten und öffentliche Meldezahlen im Radar
+- [Statistik](${origin}/statistik/): Auswertung aller öffentlichen Meldungen nach Woche, Uhrzeit, Dauer, Betreiber und Kanton
+- [Orte](${origin}/stromausfall/): Stromausfälle nach Gemeinde und Kanton, je mit aktuellem Status und Verlauf
+- [Öffentliche Daten](${origin}/api/public/stats.json): Statistik als JSON; Meldungen unter /api/public/events
 - [Methodik](${origin}${ABOUT_PATH}): Quellenregeln, Veröffentlichung und Grenzen
 
 ## Ratgeber
@@ -185,6 +189,10 @@ ${guides}
 export const SITEMAP_INDEX_PATH = "/sitemap.xml";
 export const SITEMAP_PAGES_PATH = "/sitemap-pages.xml";
 export const SITEMAP_EVENTS_PATH = "/sitemap-events.xml";
+export const SITEMAP_PLACES_PATH = "/sitemap-places.xml";
+
+export type SitemapPlaceItem = { slug: string; lastAt: string | null };
+export type SitemapCantonItem = { code: string; lastAt: string | null };
 
 const SITEMAP_LASTMOD_RE =
   /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?)?$/;
@@ -337,19 +345,47 @@ export function buildSitemapIndexXml(sitemaps: Array<{ loc: string; lastmod?: st
   return `<?xml version="1.0" encoding="UTF-8"?>\n<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${body}\n</sitemapindex>`;
 }
 
+/** Place hubs, canton pages and the places index (only indexable entries are passed in). */
+export function placeIndexablePages(
+  places: SitemapPlaceItem[],
+  cantons: SitemapCantonItem[],
+  origin = SITE_ORIGIN
+): SitemapEntry[] {
+  const latest = latestSitemapLastmod([...places, ...cantons].map((item) => item.lastAt));
+  return [
+    ...localizedStaticPages({ kind: "places" }, latest, origin),
+    ...cantons.flatMap((canton) => {
+      const known = cantonByCode(canton.code);
+      if (!known) return [];
+      return APP_LOCALES.map((locale) => {
+        const path = pathFor({ kind: "canton", slug: cantonSlug(known, locale) }, locale);
+        return { loc: `${origin}${path}`, lastmod: sitemapLastmodValue(canton.lastAt), alternates: alternatesFor(path, origin) };
+      });
+    }),
+    ...places.flatMap((place) => localizedStaticPages({ kind: "place", slug: place.slug }, sitemapLastmodValue(place.lastAt), origin))
+  ];
+}
+
 export function buildPublicSitemapDocuments(input: {
   origin?: string;
   events?: SitemapEventItem[];
   operatorLastmods?: Map<string, string> | Record<string, string>;
-} = {}): { index: string; pages: string; events: string } {
+  places?: SitemapPlaceItem[];
+  cantons?: SitemapCantonItem[];
+  statsLastmod?: string | null;
+} = {}): { index: string; pages: string; events: string; places: string } {
   const origin = input.origin ?? SITE_ORIGIN;
   const events = input.events ?? [];
-  const pageEntries = staticIndexablePages(
-    origin,
-    input.operatorLastmods ?? new Map(),
-    latestSitemapLastmod(events.map((item) => item.updated_at))
-  );
+  const pageEntries = [
+    ...staticIndexablePages(
+      origin,
+      input.operatorLastmods ?? new Map(),
+      latestSitemapLastmod(events.map((item) => item.updated_at))
+    ),
+    ...(input.statsLastmod ? localizedStaticPages({ kind: "stats" }, sitemapLastmodValue(input.statsLastmod), origin) : [])
+  ];
   const eventEntries = eventIndexablePages(events, origin);
+  const placeEntries = placeIndexablePages(input.places ?? [], input.cantons ?? [], origin);
   return {
     index: buildSitemapIndexXml([
       {
@@ -359,10 +395,15 @@ export function buildPublicSitemapDocuments(input: {
       {
         loc: `${origin}${SITEMAP_EVENTS_PATH}`,
         lastmod: latestSitemapLastmod(eventEntries.map((entry) => entry.lastmod))
-      }
+      },
+      ...(placeEntries.length && (input.places?.length || input.cantons?.length) ? [{
+        loc: `${origin}${SITEMAP_PLACES_PATH}`,
+        lastmod: latestSitemapLastmod(placeEntries.map((entry) => entry.lastmod))
+      }] : [])
     ]),
     pages: buildSitemapXml(pageEntries),
-    events: buildSitemapXml(eventEntries)
+    events: buildSitemapXml(eventEntries),
+    places: buildSitemapXml(placeEntries)
   };
 }
 
@@ -370,12 +411,12 @@ export function sitemapCacheControl(pathname: string): string {
   if (pathname === SITEMAP_EVENTS_PATH) {
     return "public,max-age=60,s-maxage=300,stale-while-revalidate=600";
   }
-  if (pathname === SITEMAP_PAGES_PATH) {
+  if (pathname === SITEMAP_PAGES_PATH || pathname === SITEMAP_PLACES_PATH) {
     return "public,max-age=300,s-maxage=1800,stale-while-revalidate=3600";
   }
   return "public,max-age=120,s-maxage=300,stale-while-revalidate=600";
 }
 
 export function isSitemapPath(pathname: string): boolean {
-  return pathname === SITEMAP_INDEX_PATH || pathname === SITEMAP_PAGES_PATH || pathname === SITEMAP_EVENTS_PATH;
+  return pathname === SITEMAP_INDEX_PATH || pathname === SITEMAP_PAGES_PATH || pathname === SITEMAP_EVENTS_PATH || pathname === SITEMAP_PLACES_PATH;
 }

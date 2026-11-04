@@ -1,28 +1,31 @@
 ---
 /**
- * Radar home: desktop = split map|list (viewport-locked), mobile = map HUD.
+ * Radar home: desktop = split map | list (viewport-locked), mobile = map HUD + drawer.
+ * The Worker (src/seo-home.ts) fills #radar-list with server-rendered rows and
+ * #radar-index with the compact public index; this script then takes over with
+ * instant search and filtering over the full index (src/radar-view.ts).
  */
 import maplibreCss from "maplibre-gl/dist/maplibre-gl.css?url";
 import RadarLayout from "../../layouts/RadarLayout.astro";
 import AppLangSwitch from "@/components/app/AppLangSwitch.astro";
+import "../../styles/radar-items.css";
 import { homeJsonLd } from "../../seo-site";
+import { renderHomeAbout } from "../../seo-home";
 import {
-  EVENT_STEM,
   localeFromParam,
-  localePrefix,
   localeStaticPaths,
   pathFor,
-  radarCopy,
+  radarViewCopy,
   t,
   type AppLocale
 } from "../../i18n";
 import { SITE_ORIGIN, absoluteUrl } from "../../public-url";
 import { Button } from "@/components/starwind/button";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/starwind/input-group";
-import { Skeleton } from "@/components/starwind/skeleton";
 import Search from "@tabler/icons/outline/search.svg";
 import X from "@tabler/icons/outline/x.svg";
 import List from "@tabler/icons/outline/list.svg";
+import Refresh from "@tabler/icons/outline/refresh.svg";
 
 export function getStaticPaths() {
   return localeStaticPaths();
@@ -32,15 +35,12 @@ const locale: AppLocale = Astro.props.locale ?? localeFromParam(
   Array.isArray(Astro.params.locale) ? Astro.params.locale[0] : Astro.params.locale
 );
 const homePath = pathFor({ kind: "home" }, locale);
-const copyPayload = {
-  ...radarCopy(locale),
-  eventStem: EVENT_STEM[locale],
-  localePrefix: localePrefix(locale)
-};
+const copy = radarViewCopy(locale);
+const views = ["now", "planned", "history"] as const;
 ---
 
 <RadarLayout
-  title={t(locale, "site.homeTitle")}
+  title={t(locale, "data.home.title")}
   description={t(locale, "site.description")}
   canonical={absoluteUrl(homePath, SITE_ORIGIN)}
   robots="index,follow,max-image-preview:large"
@@ -52,19 +52,18 @@ const copyPayload = {
   <link slot="head" rel="preconnect" href="https://vectortiles.geo.admin.ch" crossorigin />
   <link slot="head" rel="dns-prefetch" href="https://vectortiles.geo.admin.ch" />
   <script slot="head" type="application/ld+json" set:html={homeJsonLd(SITE_ORIGIN, locale)} />
-  <script id="radar-i18n" type="application/json" set:html={JSON.stringify(copyPayload).replace(/</g, "\\u003c")} />
+  <script id="radar-i18n" type="application/json" set:html={JSON.stringify(copy).replace(/</g, "\\u003c")} />
+  <script id="radar-index" type="application/json" set:html="null" />
 
   <section class="radar" data-radar>
-    <h1 class="sr-only">{t(locale, "site.homeH1")}</h1>
-    <div class="radar__map-wrap">
+    <div class="radar__map-wrap" data-loading-label={t(locale, "event.mapLoading")}>
       <div id="radar-map" class="radar__map" role="img" aria-label={t(locale, "home.mapAria")}></div>
-      <div class="radar__legend">
-        <span data-shape="unplanned"><i class="radar-mark radar-mark--triangle" aria-hidden="true"></i>{t(locale, "home.legendUnplanned")}</span>
-        <span data-shape="planned"><i class="radar-mark radar-mark--square" aria-hidden="true"></i>{t(locale, "home.legendPlanned")}</span>
-        <span data-tone="active"><i aria-hidden="true"></i>{t(locale, "home.legendActive")}</span>
-        <span data-tone="upcoming"><i aria-hidden="true"></i>{t(locale, "home.legendUpcoming")}</span>
-        <span data-tone="resolved"><i aria-hidden="true"></i>{t(locale, "home.legendResolved")}</span>
-        <span data-tone="other"><i aria-hidden="true"></i>{t(locale, "home.legendArchive")}</span>
+      <div class="radar__legend" aria-hidden="true">
+        <span><i class="legend-shape legend-shape--triangle"></i>{t(locale, "home.legendUnplanned")}</span>
+        <span><i class="legend-shape legend-shape--square"></i>{t(locale, "home.legendPlanned")}</span>
+        <span><i class="legend-dot" data-tone="active"></i>{t(locale, "home.legendActive")}</span>
+        <span><i class="legend-dot" data-tone="upcoming"></i>{t(locale, "home.legendUpcoming")}</span>
+        <span><i class="legend-dot" data-tone="resolved"></i>{t(locale, "home.legendResolved")}</span>
       </div>
       <p class="radar__disclaimer">{t(locale, "home.disclaimer")}</p>
     </div>
@@ -72,7 +71,7 @@ const copyPayload = {
     <header class="radar__hud">
       <div class="radar__hud-bar">
         <a class="radar__brand" href={homePath} aria-label="outage.ch Radar">outage.ch</a>
-        <InputGroup class="radar__search min-w-0 bg-card">
+        <InputGroup class="radar__search min-w-0">
           <InputGroupAddon>
             <Search class="size-4" aria-hidden="true" />
           </InputGroupAddon>
@@ -80,42 +79,57 @@ const copyPayload = {
           <InputGroupInput
             id="radar-search"
             type="search"
-            placeholder={t(locale, "home.searchPlaceholder")}
+            placeholder={t(locale, "data.radar.searchHint")}
             autocomplete="off"
             enterkeyhint="search"
+            aria-keyshortcuts="/"
           />
+          <kbd class="radar__kbd" aria-hidden="true">/</kbd>
         </InputGroup>
         <AppLangSwitch locale={locale} class="app-langs--hud" />
       </div>
       <div class="radar__filters">
-        <div class="radar__chips-scroller">
-          <div id="radar-chips" class="radar__chips" role="toolbar" aria-label={t(locale, "home.filterStatus")}></div>
-          <span class="radar__chips-split" aria-hidden="true"></span>
-          <div id="radar-nature" class="radar__chips radar__chips--nature" role="toolbar" aria-label={t(locale, "home.filterNature")}></div>
+        <div class="radar__views" role="group" aria-label={t(locale, "data.radar.viewsAria")}>
+          {views.map((view) => (
+            <button type="button" class="radar-view" data-view={view} aria-pressed={view === "now" ? "true" : "false"}>
+              {copy.views[view]}<span class="radar-view__n" data-view-count={view}>–</span>
+            </button>
+          ))}
+        </div>
+        <div class="radar__nature" role="group" aria-label={t(locale, "home.filterNature")}>
+          <button type="button" class="radar-toggle" data-nature="" aria-pressed="true">{copy.natureAll}</button>
+          <button type="button" class="radar-toggle" data-nature="unplanned" aria-pressed="false"><i class="legend-shape legend-shape--triangle" aria-hidden="true"></i>{copy.nature.unplanned}</button>
+          <button type="button" class="radar-toggle" data-nature="planned" aria-pressed="false"><i class="legend-shape legend-shape--square" aria-hidden="true"></i>{copy.nature.planned}</button>
         </div>
       </div>
     </header>
 
-    <aside class="radar__panel" id="radar-panel" inert aria-hidden="true">
+    <aside class="radar__panel" id="radar-panel" aria-labelledby="radar-title">
       <div class="radar__handle" aria-hidden="true"></div>
       <div class="radar__panel-head">
-        <div>
-          <h2>{t(locale, "home.reports")}</h2>
-          <p id="radar-count" class="radar__count">…</p>
+        <div class="min-w-0">
+          <h1 id="radar-title">{t(locale, "data.home.h1")}</h1>
+          <p id="radar-count" class="radar__count" aria-live="polite">{t(locale, "home.loading")}</p>
         </div>
         <div class="radar__panel-actions">
-          <Button type="button" id="radar-refresh" variant="ghost" size="sm">{t(locale, "home.refresh")}</Button>
+          <Button type="button" id="radar-refresh" variant="ghost" size="icon-sm" aria-label={t(locale, "home.refresh")} title={t(locale, "home.refresh")}>
+            <Refresh class="size-4" aria-hidden="true" />
+          </Button>
           <Button type="button" id="radar-panel-close" variant="ghost" size="sm" class="radar__panel-close" aria-label={t(locale, "home.closeList")}>{t(locale, "home.close")}</Button>
         </div>
       </div>
-      <div id="radar-list" class="radar__list" aria-live="polite" aria-busy="true">
-        <Skeleton class="mx-4 my-2.5 h-20" />
-        <Skeleton class="mx-4 my-2.5 h-20" />
-        <Skeleton class="mx-4 my-2.5 h-20" />
+      <div class="radar__scroll" id="radar-scroll">
+        <div id="radar-list" class="radar__list" aria-busy="true">
+          <div class="radar-skel"></div><div class="radar-skel"></div><div class="radar-skel"></div>
+        </div>
+        <div class="radar__more-wrap">
+          <Button type="button" id="radar-more" variant="outline" size="sm" class="w-full" hidden>{t(locale, "home.loadMore")}</Button>
+        </div>
+        <Fragment set:html={renderHomeAbout(locale)} />
       </div>
       <div class="radar__panel-foot">
-        <Button type="button" id="radar-more" variant="outline" size="sm" class="w-full" hidden>{t(locale, "home.loadMore")}</Button>
         <p id="radar-note" class="radar__note">{t(locale, "home.loading")}</p>
+        <p class="radar__foot-disclaimer">{t(locale, "home.disclaimer")}</p>
       </div>
     </aside>
 
@@ -135,222 +149,120 @@ const copyPayload = {
   </section>
 
   <script>
-    type PublicItem = {
-      id: number;
-      location: string;
-      canton: string | null;
-      url: string;
-      status: "upcoming" | "active" | "resolved" | "stale_unconfirmed" | "historical" | null;
-      nature: "planned" | "unplanned" | "unknown";
-      summary: string;
-      cause: string | null;
-      source: { publisher: string; domain: string };
-      latitude?: number | null;
-      longitude?: number | null;
-    };
-
-    type Category = "active" | "upcoming" | "resolved" | "other";
-
-    type RadarCopy = {
-      locale: string;
-      eventStem: string;
-      localePrefix: string;
-      dateLocale: string;
-      status: Record<string, string>;
-      nature: Record<string, string>;
-      filters: Record<string, string>;
-      visibleCount: string;
-      loadError: string;
-      retry: string;
-      emptyQuery: string;
-      emptyFilter: string;
-      showAll: string;
-      openReport: string;
-      loading: string;
-      asOf: string;
-    };
+    import {
+      HISTORY_PAGE,
+      countLabel,
+      eventHref,
+      fromIndex,
+      groupItems,
+      groupsHtml,
+      inView,
+      matchesNature,
+      matchesQuery,
+      rowHtml,
+      sortForView,
+      toneOf,
+      viewCounts,
+      type RadarCopy,
+      type RadarItem,
+      type RadarNature,
+      type RadarView
+    } from "../../radar-view";
+    import { SWISS_CANTONS } from "../../swiss-cantons";
 
     const copy = JSON.parse(document.querySelector("#radar-i18n")?.textContent || "{}") as RadarCopy;
+    const VIEWS: RadarView[] = ["now", "planned", "history"];
+    // Each poll is a Worker invocation (100k/day on the free plan): keep it rare.
+    const REFRESH_MS = 600_000;
 
-    const STATUS_FILTERS = [
-      { key: "", label: copy.filters.all, tone: "all" },
-      { key: "active", label: copy.filters.active, tone: "active" },
-      { key: "upcoming", label: copy.filters.upcoming, tone: "upcoming" },
-      { key: "resolved", label: copy.filters.resolved, tone: "resolved" },
-      { key: "historical", label: copy.filters.historical, tone: "historical" }
-    ] as const;
-
-    const NATURE_FILTERS = [
-      { key: "", label: copy.filters.allNatures, mark: "mixed" },
-      { key: "unplanned", label: copy.filters.unplanned, mark: "triangle" },
-      { key: "planned", label: copy.filters.planned, mark: "square" }
-    ] as const;
-
-    const COLOR: Record<Category, string> = {
-      active: "#B5474C",
-      upcoming: "#B56A1A",
-      resolved: "#3F7A5C",
-      other: "#6B7280"
-    };
-
-    const CANTON_CENTROIDS: Record<string, [number, number]> = {
-      ZH: [47.3769, 8.5417], BE: [46.948, 7.4474], LU: [47.0502, 8.3093],
-      UR: [46.8817, 8.6444], SZ: [47.0207, 8.652], OW: [46.898, 8.244],
-      NW: [46.9581, 8.366], GL: [47.0404, 9.068], ZG: [47.1662, 8.5155],
-      FR: [46.8065, 7.162], SO: [47.2088, 7.5323], BS: [47.5596, 7.5886],
-      BL: [47.4418, 7.764], SH: [47.696, 8.634], AR: [47.3667, 9.3],
-      AI: [47.331, 9.409], SG: [47.4245, 9.3767], GR: [46.8499, 9.5329],
-      AG: [47.3925, 8.0444], TG: [47.556, 8.896], TI: [46.2044, 9.024],
-      VD: [46.5197, 6.6323], VS: [46.2276, 7.3606], NE: [46.99, 6.929],
-      GE: [46.2044, 6.1432], JU: [47.365, 7.345]
-    };
+    const params = new URLSearchParams(location.search);
+    const initialView = params.get("view") as RadarView | null;
+    const initialNature = params.get("type") as RadarNature | null;
 
     const state = {
-      items: [] as PublicItem[],
-      nextCursor: null as string | null,
-      query: "",
-      status: "",
-      nature: "" as "" | "planned" | "unplanned",
-      selectedId: null as number | null,
-      loading: false,
-      error: null as string | null,
+      items: [] as RadarItem[],
       generatedAt: null as string | null,
-      drawerOpen: false
+      view: (initialView && VIEWS.includes(initialView) ? initialView : "now") as RadarView,
+      nature: (initialNature === "planned" || initialNature === "unplanned" ? initialNature : "") as RadarNature,
+      query: params.get("q") ?? "",
+      limit: HISTORY_PAGE,
+      selectedId: null as number | null,
+      drawerOpen: false,
+      loading: false,
+      error: false,
+      /** True while only the embedded "now" subset is loaded. */
+      partial: false,
+      embeddedCounts: null as Record<RadarView, number> | null
     };
 
+    const $ = <T extends Element>(selector: string) => document.querySelector<T>(selector)!;
+    const listEl = $<HTMLElement>("#radar-list");
+    const scrollEl = $<HTMLElement>("#radar-scroll");
+    const countEl = $<HTMLElement>("#radar-count");
+    const noteEl = $<HTMLElement>("#radar-note");
+    const moreBtn = $<HTMLButtonElement>("#radar-more");
+    const searchEl = $<HTMLInputElement>("#radar-search");
+    const panelEl = $<HTMLElement>("#radar-panel");
+    const sheetEl = $<HTMLElement>("#radar-sheet");
+    const sheetBody = $<HTMLElement>("#radar-sheet-body");
+    const sheetLink = $<HTMLAnchorElement>("#radar-sheet-link");
+    const fabEl = $<HTMLButtonElement>("#radar-list-fab");
+    const fabCountEl = $<HTMLElement>("#radar-fab-count");
+    const mapWrap = $<HTMLElement>(".radar__map-wrap");
+    searchEl.value = state.query;
+
+    const CANTON_CENTROIDS = new Map(SWISS_CANTONS.map((canton) => [canton.code, canton.centroid]));
+    const cssVar = (name: string, fallback: string) =>
+      getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+    const TONE_COLOR = () => ({
+      active: cssVar("--status-active", "#cb2a2f"),
+      upcoming: cssVar("--status-upcoming", "#b45309"),
+      resolved: cssVar("--status-resolved", "#2f7d4f"),
+      other: cssVar("--status-archive", "#6b7280")
+    });
+    let colors = TONE_COLOR();
+
+    const isMobile = () => window.matchMedia("(max-width: 899px)").matches;
+    const now = () => Date.now();
+    const searching = () => state.query.trim().length > 0;
+
+    function filtered(): RadarItem[] {
+      const t = now();
+      if (searching()) {
+        return sortForView(state.items.filter((item) => matchesNature(item, state.nature) && matchesQuery(item, state.query)), "now");
+      }
+      return sortForView(state.items.filter((item) => inView(item, state.view, t) && matchesNature(item, state.nature)), state.view);
+    }
+
+    function visibleItems(all = filtered()): RadarItem[] {
+      return state.view === "history" || searching() ? all.slice(0, state.limit) : all;
+    }
+
+    function pinFor(item: RadarItem): [number, number] | null {
+      if (typeof item.lat === "number" && typeof item.lon === "number") return [item.lon, item.lat];
+      const centroid = item.canton ? CANTON_CENTROIDS.get(item.canton) : null;
+      if (!centroid) return null;
+      return [centroid[1] + ((item.id % 13) - 6) * 0.012, centroid[0] + ((item.id % 17) - 8) * 0.012];
+    }
+
+    function syncUrl() {
+      const next = new URLSearchParams();
+      if (state.view !== "now") next.set("view", state.view);
+      if (state.nature) next.set("type", state.nature);
+      if (state.query.trim()) next.set("q", state.query.trim());
+      const query = next.toString();
+      history.replaceState(null, "", `${location.pathname}${query ? `?${query}` : ""}`);
+    }
+
+    // ---------------------------------------------------------------- map
     let map: any = null;
     let maplibregl: any = null;
     let mapReady = false;
     let mapInit: Promise<any> | null = null;
     let lastFitKey = "";
-    let searchTimer = 0;
-    let resizeTimer = 0;
 
-    const listEl = document.querySelector<HTMLElement>("#radar-list")!;
-    const chipsEl = document.querySelector<HTMLElement>("#radar-chips")!;
-    const natureEl = document.querySelector<HTMLElement>("#radar-nature")!;
-    const countEl = document.querySelector<HTMLElement>("#radar-count")!;
-    const noteEl = document.querySelector<HTMLElement>("#radar-note")!;
-    const moreBtn = document.querySelector<HTMLButtonElement>("#radar-more")!;
-    const searchEl = document.querySelector<HTMLInputElement>("#radar-search")!;
-    const panelEl = document.querySelector<HTMLElement>("#radar-panel")!;
-    const sheetEl = document.querySelector<HTMLElement>("#radar-sheet")!;
-    const sheetBody = document.querySelector<HTMLElement>("#radar-sheet-body")!;
-    const sheetLink = document.querySelector<HTMLAnchorElement>("#radar-sheet-link")!;
-    const fabEl = document.querySelector<HTMLButtonElement>("#radar-list-fab")!;
-    const fabCountEl = document.querySelector<HTMLElement>("#radar-fab-count");
-    const mapWrap = document.querySelector<HTMLElement>(".radar__map-wrap");
-
-    const escapeHtml = (value: unknown) =>
-      String(value ?? "")
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;");
-
-    const categorize = (status: PublicItem["status"]): Category => {
-      if (status === "active") return "active";
-      if (status === "upcoming") return "upcoming";
-      if (status === "resolved") return "resolved";
-      return "other";
-    };
-
-    const statusLabel = (status: PublicItem["status"]) => {
-      if (status === "active") return copy.status.active;
-      if (status === "upcoming") return copy.status.upcoming;
-      if (status === "resolved") return copy.status.resolved;
-      if (status === "stale_unconfirmed") return copy.status.stale;
-      if (status === "historical") return copy.status.historical;
-      return copy.status.unknown;
-    };
-
-    const natureLabel = (nature: PublicItem["nature"]) => {
-      if (nature === "planned") return copy.nature.planned;
-      if (nature === "unplanned") return copy.nature.unplanned;
-      return copy.nature.unknown;
-    };
-
-    const eventHref = (item: PublicItem) => {
-      const slugId = item.url.match(/^\/stromausfall\/([a-z0-9-]+-\d+)\/?$/)?.[1];
-      if (!slugId) return item.url;
-      return `${copy.localePrefix}/${copy.eventStem}/${slugId}`;
-    };
-
-    const natureShape = (nature: PublicItem["nature"]) =>
-      nature === "planned" ? "square" : "triangle";
-
-    const markHtml = (shape: "triangle" | "square" | "mixed") =>
-      shape === "mixed"
-        ? `<i class="radar-mark radar-mark--mixed" aria-hidden="true"></i>`
-        : `<i class="radar-mark radar-mark--${shape}" aria-hidden="true"></i>`;
-
-    const isMobile = () => window.matchMedia("(max-width: 899px)").matches;
-
-    const shortLocation = (value: string) => value.split(",")[0]?.trim() || value;
-
-    const syncPanelA11y = () => {
-      if (isMobile()) {
-        const open = state.drawerOpen;
-        panelEl.toggleAttribute("inert", !open);
-        panelEl.setAttribute("aria-hidden", open ? "false" : "true");
-        fabEl.setAttribute("aria-expanded", open ? "true" : "false");
-      } else {
-        panelEl.removeAttribute("inert");
-        panelEl.removeAttribute("aria-hidden");
-        fabEl.setAttribute("aria-expanded", "true");
-      }
-    };
-
-    const pinFor = (item: PublicItem): [number, number] | null => {
-      if (typeof item.latitude === "number" && typeof item.longitude === "number") {
-        return [item.longitude, item.latitude];
-      }
-      if (item.canton && CANTON_CENTROIDS[item.canton]) {
-        const [lat, lon] = CANTON_CENTROIDS[item.canton];
-        const j = ((item.id % 17) - 8) * 0.012;
-        return [lon + ((item.id % 13) - 6) * 0.012, lat + j];
-      }
-      return null;
-    };
-
-    const filtered = () => {
-      const q = state.query.trim().toLowerCase();
-      return state.items.filter((item) => {
-        if (state.status === "historical") {
-          if (item.status !== "historical" && item.status !== "stale_unconfirmed") return false;
-        } else if (state.status && item.status !== state.status) {
-          return false;
-        }
-        if (state.nature === "planned" && item.nature !== "planned") return false;
-        if (state.nature === "unplanned" && item.nature === "planned") return false;
-        if (!q) return true;
-        const hay = `${item.location} ${item.canton ?? ""} ${item.summary} ${item.cause ?? ""}`.toLowerCase();
-        return hay.includes(q);
-      });
-    };
-
-    const featuresFor = (items: PublicItem[]) =>
-      items
-        .map((item) => {
-          const coords = pinFor(item);
-          if (!coords) return null;
-          const selected = state.selectedId === item.id;
-          return {
-            type: "Feature" as const,
-            properties: {
-              id: item.id,
-              color: COLOR[categorize(item.status)],
-              icon: markerId(natureShape(item.nature), COLOR[categorize(item.status)], selected),
-              selected: selected ? 1 : 0
-            },
-            geometry: { type: "Point" as const, coordinates: coords }
-          };
-        })
-        .filter(Boolean);
-
-    function markerId(shape: "triangle" | "square", color: string, selected: boolean) {
-      return `pin-${shape}-${color.replace("#", "")}-${selected ? "s" : "n"}`;
-    }
+    const markerId = (shape: "triangle" | "square", color: string, selected: boolean) =>
+      `pin-${shape}-${color.replace(/[^a-z0-9]/gi, "")}-${selected ? "s" : "n"}`;
 
     function drawMarker(shape: "triangle" | "square", color: string, selected: boolean) {
       const dpr = 2;
@@ -361,7 +273,6 @@ const copyPayload = {
       const ctx = canvas.getContext("2d")!;
       const pad = (selected ? 3.5 : 3) * dpr;
       ctx.lineJoin = "round";
-      ctx.lineCap = "round";
       ctx.lineWidth = 2.2 * dpr;
       ctx.fillStyle = color;
       ctx.strokeStyle = "#fff";
@@ -373,47 +284,41 @@ const copyPayload = {
         ctx.closePath();
       } else {
         const r = 2.5 * dpr;
-        const x = pad;
-        const y = pad;
         const w = size - pad * 2;
-        const h = size - pad * 2;
-        ctx.moveTo(x + r, y);
-        ctx.arcTo(x + w, y, x + w, y + h, r);
-        ctx.arcTo(x + w, y + h, x, y + h, r);
-        ctx.arcTo(x, y + h, x, y, r);
-        ctx.arcTo(x, y, x + w, y, r);
+        ctx.moveTo(pad + r, pad);
+        ctx.arcTo(pad + w, pad, pad + w, pad + w, r);
+        ctx.arcTo(pad + w, pad + w, pad, pad + w, r);
+        ctx.arcTo(pad, pad + w, pad, pad, r);
+        ctx.arcTo(pad, pad, pad + w, pad, r);
         ctx.closePath();
       }
       ctx.fill();
       ctx.stroke();
-      return {
-        width: size,
-        height: size,
-        data: new Uint8Array(ctx.getImageData(0, 0, size, size).data)
-      };
+      return { width: size, height: size, data: new Uint8Array(ctx.getImageData(0, 0, size, size).data) };
     }
 
-    function ensureMarkerImages(items: PublicItem[]) {
-      if (!map) return;
-      for (const item of items) {
-        if (!pinFor(item)) continue;
-        const shape = natureShape(item.nature);
-        const color = COLOR[categorize(item.status)];
-        for (const selected of [false, true]) {
-          const id = markerId(shape, color, selected);
-          if (!map.hasImage(id)) {
-            map.addImage(id, drawMarker(shape, color, selected), { pixelRatio: 2 });
-          }
-        }
-      }
+    function featuresFor(items: RadarItem[]) {
+      return items.flatMap((item) => {
+        const coords = pinFor(item);
+        if (!coords) return [];
+        const shape = item.nature === "planned" ? "square" : "triangle";
+        const color = colors[toneOf(item.status)];
+        const selected = state.selectedId === item.id;
+        const icon = markerId(shape, color, selected);
+        if (map && !map.hasImage(icon)) map.addImage(icon, drawMarker(shape, color, selected), { pixelRatio: 2 });
+        return [{
+          type: "Feature" as const,
+          properties: { id: item.id, icon, rank: selected ? 3 : item.status === "active" ? 2 : item.status === "upcoming" ? 1 : 0 },
+          geometry: { type: "Point" as const, coordinates: coords }
+        }];
+      });
     }
 
     async function ensureMap() {
       if (map) return map;
       if (mapInit) return mapInit;
       mapInit = (async () => {
-        // Wait for layout so MapLibre gets a non-zero container.
-        await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+        await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
         const container = document.querySelector("#radar-map");
         if (!container) return null;
         const mod = await import("maplibre-gl");
@@ -434,171 +339,152 @@ const copyPayload = {
           pixelRatio: Math.min(window.devicePixelRatio || 1, 1.5)
         });
         map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
-        await new Promise<void>((resolve, reject) => {
-          const fail = window.setTimeout(() => reject(new Error("map timeout")), 12_000);
+        await new Promise<void>((resolve) => {
+          const fail = window.setTimeout(resolve, 12_000);
           map.once("load", () => {
             window.clearTimeout(fail);
             resolve();
           });
-          map.once("error", () => {
-            /* style tile errors are common; ignore unless never loaded */
-          });
-        }).catch(() => undefined);
-
+        });
         if (!map.getSource("outages")) {
           map.addSource("outages", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
-          map.addLayer({
-            id: "outages-hit",
-            type: "circle",
-            source: "outages",
-            paint: {
-              "circle-radius": 16,
-              "circle-color": "#000",
-              "circle-opacity": 0
-            }
-          });
+          map.addLayer({ id: "outages-hit", type: "circle", source: "outages", paint: { "circle-radius": 16, "circle-color": "#000", "circle-opacity": 0 } });
           map.addLayer({
             id: "outages-point",
             type: "symbol",
             source: "outages",
             layout: {
               "icon-image": ["get", "icon"],
-              "icon-size": 1,
               "icon-allow-overlap": true,
-              "icon-ignore-placement": true
+              "icon-ignore-placement": true,
+              "symbol-sort-key": ["get", "rank"]
             }
           });
-          const pick = (e: any) => {
-            const id = Number(e.features?.[0]?.properties?.id);
-            if (!Number.isFinite(id)) return;
-            selectItem(id, { openSheet: isMobile() });
+          const pick = (event: any) => {
+            const id = Number(event.features?.[0]?.properties?.id);
+            if (Number.isFinite(id)) selectItem(id, { openSheet: isMobile(), scroll: true });
           };
           map.on("click", "outages-hit", pick);
           map.on("click", "outages-point", pick);
-          map.on("mouseenter", "outages-hit", () => {
-            map.getCanvas().style.cursor = "pointer";
-          });
-          map.on("mouseleave", "outages-hit", () => {
-            map.getCanvas().style.cursor = "";
-          });
+          map.on("mouseenter", "outages-hit", () => { map.getCanvas().style.cursor = "pointer"; });
+          map.on("mouseleave", "outages-hit", () => { map.getCanvas().style.cursor = ""; });
         }
         map.resize();
         mapReady = true;
-        mapWrap?.classList.add("is-ready");
+        mapWrap.classList.add("is-ready");
         return map;
       })();
       return mapInit;
     }
 
-    function syncPins(fit = false) {
+    function syncPins(fit: boolean, recenter = false) {
       if (!map || !mapReady) return;
-      const items = filtered();
-      ensureMarkerImages(items);
+      const items = visibleItems();
       const features = featuresFor(items);
       map.getSource("outages")?.setData({ type: "FeatureCollection", features });
-
-      if (state.selectedId != null) {
-        const sel = state.items.find((i) => i.id === state.selectedId);
-        const coords = sel ? pinFor(sel) : null;
+      const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (recenter && state.selectedId != null) {
+        const selected = state.items.find((item) => item.id === state.selectedId);
+        const coords = selected ? pinFor(selected) : null;
         if (coords) {
-          map.easeTo({
-            center: coords,
-            zoom: Math.max(map.getZoom(), 10),
-            duration: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 280
-          });
+          map.easeTo({ center: coords, zoom: Math.max(map.getZoom(), 10), duration: reduce ? 0 : 280 });
           return;
         }
       }
-
-      if (!fit || features.length === 0) return;
-      const fitKey = `${state.status}|${state.nature}|${state.query}|${features.length}`;
-      if (fitKey === lastFitKey) return;
-      lastFitKey = fitKey;
+      if (!fit || !features.length) return;
+      const key = `${state.view}|${state.nature}|${state.query}|${features.length}`;
+      if (key === lastFitKey) return;
+      lastFitKey = key;
       const bounds = new maplibregl.LngLatBounds();
-      for (const f of features as any[]) bounds.extend(f.geometry.coordinates);
-      map.fitBounds(bounds, {
-        padding: isMobile() ? 48 : 40,
-        maxZoom: 10.5,
-        duration: 0
+      for (const feature of features) bounds.extend(feature.geometry.coordinates);
+      map.fitBounds(bounds, { padding: isMobile() ? 56 : 48, maxZoom: 10.5, duration: reduce ? 0 : 400 });
+    }
+
+    // ----------------------------------------------------------- render
+    function escapeText(value: string) {
+      return value.replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char]!);
+    }
+
+    function renderControls() {
+      const counts = viewCounts(state.items, state.nature, now());
+      // With only the "now" subset loaded, planned/history counts come from the server.
+      if (state.partial && state.embeddedCounts && !state.nature) {
+        counts.planned = state.embeddedCounts.planned;
+        counts.history = state.embeddedCounts.history;
+      }
+      document.querySelectorAll<HTMLButtonElement>("[data-view]").forEach((button) => {
+        const view = button.dataset.view as RadarView;
+        button.setAttribute("aria-pressed", String(!searching() && view === state.view));
+        const n = button.querySelector("[data-view-count]");
+        if (n) n.textContent = String(counts[view]);
+      });
+      document.querySelectorAll<HTMLButtonElement>("[data-nature]").forEach((button) => {
+        button.setAttribute("aria-pressed", String((button.dataset.nature ?? "") === state.nature));
       });
     }
 
-    function rowHtml(item: PublicItem, selected: boolean) {
-      const badge = item.status ?? "historical";
-      const tone = categorize(item.status);
-      const shape = natureShape(item.nature);
-      return `
-        <a class="radar-row radar-row--${tone} ${selected ? "is-selected" : ""}" href="${escapeHtml(eventHref(item))}" data-id="${item.id}">
-          <div class="radar-row__top">
-            <h2>${markHtml(shape)} ${escapeHtml(shortLocation(item.location))}${item.canton ? ` <span class="radar-row__canton">${escapeHtml(item.canton)}</span>` : ""}</h2>
-            <span class="radar-badge radar-badge--${escapeHtml(badge)}">${escapeHtml(statusLabel(item.status))}</span>
-          </div>
-          <p>${escapeHtml(item.summary)}</p>
-          <div class="radar-row__foot">
-            <div class="radar-row__meta">${escapeHtml(natureLabel(item.nature))} · ${escapeHtml(item.source.publisher)}</div>
-            <span class="radar-row__cta" data-nav>${escapeHtml(copy.openReport)}</span>
-          </div>
-        </a>`;
-    }
-
-    function renderChips() {
-      const statusCounts: Record<string, number> = { "": 0, active: 0, upcoming: 0, resolved: 0, historical: 0 };
-      const natureCounts: Record<string, number> = { "": 0, planned: 0, unplanned: 0 };
-      for (const item of state.items) {
-        statusCounts[""] += 1;
-        if (item.status === "active") statusCounts.active += 1;
-        else if (item.status === "upcoming") statusCounts.upcoming += 1;
-        else if (item.status === "resolved") statusCounts.resolved += 1;
-        else statusCounts.historical += 1;
-        natureCounts[""] += 1;
-        if (item.nature === "planned") natureCounts.planned += 1;
-        else natureCounts.unplanned += 1;
-      }
-      chipsEl.innerHTML = STATUS_FILTERS.map(
-        (f) =>
-          `<button type="button" class="radar-chip" data-status="${f.key}" data-tone="${f.tone}" aria-pressed="${state.status === f.key}"><i class="radar-chip__dot" aria-hidden="true"></i>${f.label}<span class="n">${statusCounts[f.key] ?? 0}</span></button>`
-      ).join("");
-      natureEl.innerHTML = NATURE_FILTERS.map(
-        (f) =>
-          `<button type="button" class="radar-chip" data-nature="${f.key}" aria-pressed="${state.nature === f.key}">${markHtml(f.mark)}${f.label}<span class="n">${natureCounts[f.key] ?? 0}</span></button>`
-      ).join("");
-    }
-
     function renderList() {
-      const items = filtered();
-      const mapped = items.filter((i) => pinFor(i)).length;
-      countEl.textContent = copy.visibleCount
-        .replace("{{visible}}", String(items.length))
-        .replace("{{mapped}}", String(mapped));
-      listEl.setAttribute("aria-busy", state.loading ? "true" : "false");
-
-      if (state.loading && !state.items.length) {
-        listEl.innerHTML = `<div class="radar-skel"></div><div class="radar-skel"></div><div class="radar-skel"></div>`;
-        return;
-      }
+      const t = now();
+      const all = filtered();
+      const shown = visibleItems(all);
+      listEl.setAttribute("aria-busy", state.loading && !state.items.length ? "true" : "false");
+      countEl.textContent = countLabel(all.length, copy);
+      fabCountEl.textContent = String(all.length);
+      moreBtn.hidden = shown.length >= all.length;
+      moreBtn.textContent = copy.showMore.replace("{{count}}", String(Math.min(HISTORY_PAGE, all.length - shown.length)));
       if (state.error && !state.items.length) {
-        listEl.innerHTML = `<div class="radar__empty" role="alert"><p>${escapeHtml(copy.loadError)}</p><p>${escapeHtml(state.error)}</p><button type="button" class="radar__ghost" data-retry>${escapeHtml(copy.retry)}</button></div>`;
+        listEl.innerHTML = `<div class="radar__empty" role="alert"><p>${escapeText(copy.empty.history)}</p><button type="button" class="radar__ghost" data-retry>↻</button></div>`;
         return;
       }
-      if (!items.length) {
-        const q = state.query.trim();
-        listEl.innerHTML = `<div class="radar__empty"><p>${q ? escapeHtml(copy.emptyQuery.replace("{{query}}", q)) : escapeHtml(copy.emptyFilter)}</p><button type="button" class="radar__ghost" data-reset>${escapeHtml(copy.showAll)}</button></div>`;
+      if (!shown.length) {
+        const message = searching() ? copy.empty.query.replace("{{query}}", state.query.trim()) : copy.empty[state.view];
+        listEl.innerHTML = `<p class="radar__empty">${escapeText(message)}</p>`;
         return;
       }
-      listEl.innerHTML = items.map((i) => rowHtml(i, state.selectedId === i.id)).join("");
+      const focusedId = (document.activeElement as HTMLElement | null)?.closest?.<HTMLElement>("a.radar-item[data-id]")?.dataset.id;
+      listEl.innerHTML = groupsHtml(groupItems(shown, state.view, t, copy, searching()), t, copy, state.selectedId);
+      // Re-rendering replaces the rows; keep keyboard users where they were.
+      if (focusedId) listEl.querySelector<HTMLElement>(`a.radar-item[data-id="${focusedId}"]`)?.focus({ preventScroll: true });
     }
 
-    function openSheet(id: number) {
-      const item = state.items.find((i) => i.id === id);
-      if (!item) return;
-      sheetBody.innerHTML = `
-        <div class="radar-row__top">
-          <h2>${markHtml(natureShape(item.nature))} ${escapeHtml(shortLocation(item.location))}${item.canton ? ` <span class="radar-row__canton">${escapeHtml(item.canton)}</span>` : ""}</h2>
-          <span class="radar-badge radar-badge--${escapeHtml(item.status ?? "historical")}">${escapeHtml(statusLabel(item.status))}</span>
-        </div>
-        <p>${escapeHtml(item.summary)}</p>
-        <div class="radar-row__meta">${escapeHtml(natureLabel(item.nature))} · ${escapeHtml(item.source.publisher)}</div>`;
-      sheetLink.href = eventHref(item);
+    function renderNote() {
+      if (!state.generatedAt) return;
+      const date = new Date(state.generatedAt).toLocaleString(copy.dateLocale, { dateStyle: "short", timeStyle: "short", timeZone: "Europe/Zurich" });
+      noteEl.textContent = copy.asOf.replace("{{date}}", date);
+    }
+
+    function render(opts: { fit?: boolean } = {}) {
+      renderControls();
+      renderList();
+      renderNote();
+      syncPanelA11y();
+      if (state.items.length) void ensureMap().then(() => syncPins(Boolean(opts.fit)));
+    }
+
+    // ------------------------------------------------------ interaction
+    function syncPanelA11y() {
+      fabEl.hidden = !isMobile() || state.drawerOpen;
+      if (isMobile()) {
+        panelEl.toggleAttribute("inert", !state.drawerOpen);
+        panelEl.setAttribute("aria-hidden", state.drawerOpen ? "false" : "true");
+        fabEl.setAttribute("aria-expanded", String(state.drawerOpen));
+      } else {
+        panelEl.removeAttribute("inert");
+        panelEl.removeAttribute("aria-hidden");
+      }
+    }
+
+    function setDrawer(open: boolean) {
+      state.drawerOpen = open;
+      panelEl.classList.toggle("is-open", open);
+      document.body.classList.toggle("radar-drawer-open", open);
+      syncPanelA11y();
+      if (open) window.setTimeout(() => map?.resize(), 280);
+    }
+
+    function openSheet(item: RadarItem) {
+      sheetBody.innerHTML = rowHtml(item, now(), copy).replace(/^<a /, "<div ").replace(/<\/a>$/, "</div>");
+      sheetLink.href = eventHref(item, copy);
       sheetEl.hidden = false;
     }
 
@@ -606,154 +492,178 @@ const copyPayload = {
       sheetEl.hidden = true;
     }
 
-    function setDrawer(open: boolean) {
-      state.drawerOpen = open;
-      panelEl.classList.toggle("is-open", open);
-      fabEl.hidden = open || !isMobile();
-      document.body.classList.toggle("radar-drawer-open", open);
-      syncPanelA11y();
-      if (open) {
-        window.setTimeout(() => map?.resize(), 280);
-      }
-    }
-
-    function selectItem(id: number, opts: { openSheet?: boolean } = {}) {
+    function selectItem(id: number, opts: { openSheet?: boolean; scroll?: boolean } = {}) {
       state.selectedId = id;
       renderList();
-      syncPins(false);
-      if (opts.openSheet && isMobile()) {
+      syncPins(false, true);
+      const item = state.items.find((entry) => entry.id === id);
+      if (item && opts.openSheet && isMobile()) {
         setDrawer(false);
-        openSheet(id);
+        openSheet(item);
       }
-      const row = listEl.querySelector<HTMLElement>(`[data-id="${id}"]`);
-      row?.scrollIntoView({ block: "nearest" });
+      if (opts.scroll) listEl.querySelector<HTMLElement>(`[data-id="${id}"]`)?.scrollIntoView({ block: "nearest" });
     }
 
-    function renderUi(opts: { fitMap?: boolean } = {}) {
-      renderChips();
-      renderList();
-      moreBtn.hidden = !state.nextCursor || (!filtered().length && !state.loading);
-      noteEl.textContent = state.generatedAt
-        ? copy.asOf.replace("{{date}}", new Date(state.generatedAt).toLocaleString(copy.dateLocale, { dateStyle: "short", timeStyle: "short" }))
-        : state.loading
-          ? copy.loading
-          : "";
-      fabEl.hidden = !isMobile() || state.drawerOpen;
-      if (fabCountEl) fabCountEl.textContent = String(filtered().length);
-      syncPanelA11y();
-      if (state.items.length || opts.fitMap) {
-        void ensureMap().then(() => syncPins(Boolean(opts.fitMap)));
-      }
-    }
-
-    async function loadFeed(reset = true) {
-      if (state.loading) return;
-      state.loading = true;
-      state.error = null;
-      if (reset) {
-        state.items = [];
-        state.nextCursor = null;
-        lastFitKey = "";
-      }
-      renderUi();
-      // Start map download in parallel with API.
-      void ensureMap();
-      try {
-        const params = new URLSearchParams({ limit: "25" });
-        if (!reset && state.nextCursor) params.set("before", state.nextCursor);
-        const res = await fetch(`/api/public/events?${params}`);
-        if (!res.ok) throw new Error(`API ${res.status}`);
-        const data = (await res.json()) as { items: PublicItem[]; next_cursor: string | null; generated_at?: string };
-        state.items = reset ? data.items : [...state.items, ...data.items];
-        state.nextCursor = data.next_cursor;
-        state.generatedAt = data.generated_at ?? new Date().toISOString();
-      } catch (err) {
-        state.error = err instanceof Error ? err.message : "Laden fehlgeschlagen";
-      } finally {
-        state.loading = false;
-        renderUi({ fitMap: true });
-      }
-    }
-
-    chipsEl.addEventListener("click", (ev) => {
-      const btn = (ev.target as HTMLElement).closest<HTMLButtonElement>("[data-status]");
-      if (!btn) return;
-      state.status = btn.dataset.status ?? "";
+    function resetSelection() {
       state.selectedId = null;
       closeSheet();
       lastFitKey = "";
-      renderUi({ fitMap: true });
-    });
+    }
 
-    natureEl.addEventListener("click", (ev) => {
-      const btn = (ev.target as HTMLElement).closest<HTMLButtonElement>("[data-nature]");
-      if (!btn) return;
-      const next = (btn.dataset.nature ?? "") as typeof state.nature;
-      state.nature = next;
-      state.selectedId = null;
-      closeSheet();
-      lastFitKey = "";
-      renderUi({ fitMap: true });
-    });
-
-    listEl.addEventListener("click", (ev) => {
-      const t = ev.target as HTMLElement;
-      if (t.closest("[data-retry]")) {
-        void loadFeed(true);
-        return;
-      }
-      if (t.closest("[data-reset]")) {
+    document.querySelectorAll<HTMLButtonElement>("[data-view]").forEach((button) => button.addEventListener("click", () => {
+      state.view = button.dataset.view as RadarView;
+      if (state.partial && state.view !== "now") void loadIndex();
+      state.limit = HISTORY_PAGE;
+      if (searching()) {
         state.query = "";
-        state.status = "";
-        state.nature = "";
         searchEl.value = "";
-        lastFitKey = "";
-        renderUi({ fitMap: true });
+      }
+      resetSelection();
+      syncUrl();
+      scrollEl.scrollTop = 0;
+      render({ fit: true });
+    }));
+
+    document.querySelectorAll<HTMLButtonElement>("[data-nature]").forEach((button) => button.addEventListener("click", () => {
+      state.nature = (button.dataset.nature ?? "") as RadarNature;
+      resetSelection();
+      syncUrl();
+      render({ fit: true });
+    }));
+
+    let searchTimer = 0;
+    searchEl.addEventListener("input", () => {
+      window.clearTimeout(searchTimer);
+      if (state.partial) void loadIndex();
+      searchTimer = window.setTimeout(() => {
+        state.query = searchEl.value;
+        state.limit = HISTORY_PAGE;
+        resetSelection();
+        syncUrl();
+        render({ fit: true });
+      }, 120);
+    });
+
+    listEl.addEventListener("click", (event) => {
+      const target = event.target as HTMLElement;
+      if (target.closest("[data-retry]")) {
+        void loadIndex();
         return;
       }
-      const row = t.closest<HTMLAnchorElement>("a.radar-row[data-id]");
+      const row = target.closest<HTMLAnchorElement>("a.radar-item[data-id]");
       if (!row) return;
-      const mouse = ev as MouseEvent;
-      if (t.closest("[data-nav]") || mouse.metaKey || mouse.ctrlKey || mouse.shiftKey || mouse.button === 1) return;
+      const mouse = event as MouseEvent;
+      if (mouse.metaKey || mouse.ctrlKey || mouse.shiftKey || mouse.button === 1) return;
       const id = Number(row.dataset.id);
       if (!Number.isFinite(id)) return;
+      // First click previews on the map, the second opens the report.
       if (!isMobile() && state.selectedId === id) return;
-      ev.preventDefault();
+      event.preventDefault();
       selectItem(id, { openSheet: isMobile() });
     });
 
-    searchEl.addEventListener("input", () => {
-      window.clearTimeout(searchTimer);
-      searchTimer = window.setTimeout(() => {
-        state.query = searchEl.value;
-        state.selectedId = null;
-        lastFitKey = "";
-        renderUi({ fitMap: true });
-      }, 160);
+    moreBtn.addEventListener("click", () => {
+      state.limit += HISTORY_PAGE;
+      render();
     });
 
-    document.querySelector("#radar-refresh")?.addEventListener("click", () => void loadFeed(true));
-    moreBtn.addEventListener("click", () => void loadFeed(false));
-    document.querySelector("#radar-sheet-close")?.addEventListener("click", () => {
+    $<HTMLButtonElement>("#radar-refresh").addEventListener("click", () => void loadIndex(true));
+    $<HTMLButtonElement>("#radar-sheet-close").addEventListener("click", () => {
       closeSheet();
       state.selectedId = null;
-      renderUi();
+      render();
     });
-    document.querySelector("#radar-panel-close")?.addEventListener("click", () => setDrawer(false));
+    $<HTMLButtonElement>("#radar-panel-close").addEventListener("click", () => setDrawer(false));
     fabEl.addEventListener("click", () => setDrawer(true));
 
+    document.addEventListener("keydown", (event) => {
+      const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement;
+      if (event.key === "/" && !typing && !event.metaKey && !event.ctrlKey) {
+        event.preventDefault();
+        if (isMobile()) setDrawer(true);
+        searchEl.focus();
+        searchEl.select();
+      } else if (event.key === "Escape") {
+        if (typing && searchEl.value) {
+          searchEl.value = "";
+          state.query = "";
+          syncUrl();
+          render({ fit: true });
+        } else if (state.selectedId != null) {
+          resetSelection();
+          render();
+        } else if (state.drawerOpen) {
+          setDrawer(false);
+        }
+      }
+    });
+
+    let resizeTimer = 0;
     window.addEventListener("resize", () => {
       if (!isMobile()) {
         setDrawer(false);
         closeSheet();
       }
-      fabEl.hidden = !isMobile() || state.drawerOpen;
       syncPanelA11y();
       window.clearTimeout(resizeTimer);
       resizeTimer = window.setTimeout(() => map?.resize(), 120);
     });
 
-    void loadFeed(true);
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+      colors = TONE_COLOR();
+      syncPins(false);
+    });
+
+    // ------------------------------------------------------------- data
+    function applyIndex(payload: any) {
+      state.items = fromIndex(payload);
+      state.generatedAt = payload?.generatedAt ?? new Date().toISOString();
+      state.partial = Boolean(payload?.partial);
+      state.embeddedCounts = payload?.counts ?? null;
+      state.error = false;
+    }
+
+    async function loadIndex(manual = false) {
+      if (state.loading) return;
+      state.loading = true;
+      if (manual) document.querySelector("#radar-refresh")?.classList.add("is-spinning");
+      try {
+        const response = await fetch("/api/public/index.json", { headers: { Accept: "application/json" } });
+        if (!response.ok) throw new Error(String(response.status));
+        applyIndex(await response.json());
+      } catch {
+        state.error = !state.items.length;
+      } finally {
+        state.loading = false;
+        document.querySelector("#radar-refresh")?.classList.remove("is-spinning");
+        render({ fit: manual });
+      }
+    }
+
+    let embedded: any = null;
+    try {
+      embedded = JSON.parse(document.querySelector("#radar-index")?.textContent || "null");
+    } catch {
+      embedded = null;
+    }
+    if (embedded?.items) {
+      applyIndex(embedded);
+      render({ fit: true });
+      // Load the full index for search and the other views once the page is idle
+      // (or right away when the URL already asks for them).
+      if (state.view !== "now" || searching()) void loadIndex();
+      else {
+        const idle = (window as any).requestIdleCallback ?? ((callback: () => void) => window.setTimeout(callback, 2500));
+        idle(() => void loadIndex());
+      }
+    } else {
+      void loadIndex();
+    }
+    void ensureMap().then(() => syncPins(true));
+
+    window.setInterval(() => {
+      if (document.visibilityState === "visible") void loadIndex();
+    }, REFRESH_MS);
   </script>
 </RadarLayout>
 
@@ -785,6 +695,7 @@ const copyPayload = {
     margin: -1px;
     overflow: hidden;
     clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
     border: 0;
   }
 
@@ -794,28 +705,24 @@ const copyPayload = {
     min-height: 0;
     height: 100%;
     overflow: hidden;
-    background: #d9e0d8;
+    background: var(--map-placeholder, #e8ebe7);
   }
 
   .radar__map-wrap {
     position: absolute;
     inset: 0;
-    background:
-      linear-gradient(180deg, rgb(241 238 230 / 0.35), transparent 28%),
-      repeating-linear-gradient(0deg, rgb(28 42 38 / 0.05) 0 1px, transparent 1px 28px),
-      repeating-linear-gradient(90deg, rgb(28 42 38 / 0.05) 0 1px, transparent 1px 28px),
-      #d9e0d8;
+    background: var(--map-placeholder, #e8ebe7);
   }
 
   .radar__map-wrap:not(.is-ready)::after {
-    content: "Karte wird geladen …";
+    content: attr(data-loading-label);
     position: absolute;
     inset: 0;
     display: grid;
     place-items: center;
-    color: var(--color-muted);
-    font: 650 0.9rem/1.3 var(--font-body);
-    letter-spacing: 0.02em;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    font-weight: 550;
     pointer-events: none;
     z-index: 1;
   }
@@ -827,12 +734,18 @@ const copyPayload = {
 
   .radar__legend {
     position: absolute;
-    left: 0.65rem;
-    bottom: calc(var(--app-dock-h) + 0.65rem);
+    left: 0.75rem;
+    bottom: 0.75rem;
     z-index: 2;
     display: none;
     flex-wrap: wrap;
-    gap: 0.35rem;
+    gap: 0.75rem;
+    padding: 0.35rem 0.65rem;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius);
+    background: color-mix(in oklch, var(--surface) 92%, transparent);
+    color: var(--text-muted);
+    font-size: 0.7rem;
     pointer-events: none;
   }
 
@@ -840,43 +753,35 @@ const copyPayload = {
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
-    background: color-mix(in oklch, var(--color-surface) 92%, transparent);
-    border: 1px solid var(--color-rule);
-    border-radius: var(--radius-md);
-    padding: 0.28rem 0.55rem;
-    color: var(--color-muted);
-    font: 500 0.65rem/1.2 var(--font-body);
   }
 
-  .radar__legend i {
-    width: 0.45rem;
-    height: 0.45rem;
+  .legend-dot {
+    width: 0.5rem;
+    height: 0.5rem;
     border-radius: 99px;
+  }
+
+  .legend-dot[data-tone="active"] { background: var(--status-active); }
+  .legend-dot[data-tone="upcoming"] { background: var(--status-upcoming); }
+  .legend-dot[data-tone="resolved"] { background: var(--status-resolved); }
+
+  .legend-shape {
+    display: inline-block;
+    flex: none;
     background: currentColor;
   }
 
-  .radar__legend .radar-mark--triangle,
-  .radar__legend .radar-mark--square {
-    width: auto;
-    height: auto;
-    color: var(--color-ink);
+  .legend-shape--square {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 2px;
   }
 
-  .radar__legend .radar-mark--square {
-    width: 7px;
-    height: 7px;
-    background: var(--color-ink);
+  .legend-shape--triangle {
+    width: 0.6rem;
+    height: 0.52rem;
+    clip-path: polygon(50% 0, 100% 100%, 0 100%);
   }
-
-  .radar__legend .radar-mark--triangle {
-    border-bottom-color: var(--color-ink);
-    background: none;
-  }
-
-  .radar__legend [data-tone="active"] i { color: var(--status-active); }
-  .radar__legend [data-tone="upcoming"] i { color: var(--status-upcoming); }
-  .radar__legend [data-tone="resolved"] i { color: var(--status-resolved); }
-  .radar__legend [data-tone="other"] i { color: var(--status-other); }
 
   .radar__disclaimer {
     display: none;
@@ -885,7 +790,7 @@ const copyPayload = {
   .radar__hud {
     position: relative;
     z-index: 5;
-    padding: calc(0.38rem + env(safe-area-inset-top, 0px)) 0.6rem 0.32rem;
+    padding: calc(0.4rem + env(safe-area-inset-top, 0px)) 0.6rem 0.3rem;
     pointer-events: none;
   }
 
@@ -895,105 +800,116 @@ const copyPayload = {
 
   .radar__hud-bar {
     display: grid;
-    grid-template-columns: auto 1fr;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     gap: 0.5rem;
     align-items: center;
-    padding: 0.32rem 0.42rem;
-    border-radius: var(--app-radius);
-    background: color-mix(in oklch, var(--color-surface) 85%, transparent);
-    border: 1px solid color-mix(in oklch, var(--color-rule) 80%, transparent);
-    box-shadow:
-      0 4px 12px color-mix(in oklch, var(--color-ink) 6%, transparent),
-      0 12px 32px color-mix(in oklch, var(--color-ink) 8%, transparent);
+    padding: 0.35rem 0.4rem;
+    border: 1px solid var(--hairline);
+    border-radius: calc(var(--radius) + 2px);
+    background: color-mix(in oklch, var(--surface) 88%, transparent);
+    box-shadow: var(--shadow-float);
   }
 
   @supports (backdrop-filter: blur(12px)) {
     .radar__hud-bar {
-      background: color-mix(in oklch, var(--color-surface) 68%, transparent);
-      backdrop-filter: blur(20px) saturate(1.1);
+      background: color-mix(in oklch, var(--surface) 72%, transparent);
+      backdrop-filter: blur(18px) saturate(1.1);
     }
   }
 
   .radar__brand {
-    font: 850 0.95rem/1 var(--font-display);
-    color: var(--color-ink);
+    padding: 0 0.3rem;
+    color: var(--text);
+    font-size: 0.95rem;
+    font-weight: 680;
+    letter-spacing: -0.02em;
     text-decoration: none;
-    letter-spacing: -0.035em;
-    padding: 0 0.25rem;
-    transition: transform var(--dur-fast) var(--ease-out);
-  }
-
-  .radar__brand:hover {
-    transform: scale(1.02);
   }
 
   .radar__search {
     min-width: 0;
-    height: 2.6rem;
-    min-height: 2.6rem;
+    height: 2.4rem;
+    min-height: 2.4rem;
   }
 
   .radar__hud [data-slot="input-group"] {
-    height: 2.6rem;
-    min-height: 2.6rem;
-    background: var(--color-surface);
-    border-radius: var(--radius);
+    height: 2.4rem;
+    min-height: 2.4rem;
+    background: var(--surface);
   }
 
-  .radar__search-icon {
+  .radar__kbd {
     display: none;
-  }
-
-  .radar__icon-btn {
-    border: 0;
-    background: transparent;
-    border-radius: var(--radius-md);
-    min-height: 42px;
-    padding: 0.4rem 0.6rem;
-    font: 575 0.78rem/1 var(--font-body);
-    cursor: pointer;
-    color: var(--color-muted);
-    transition: color var(--dur-fast) var(--ease-out);
-  }
-
-  .radar__icon-btn:hover {
-    color: var(--color-ink);
+    margin-right: 0.5rem;
+    padding: 0.05rem 0.4rem;
+    border: 1px solid var(--hairline);
+    border-radius: 4px;
+    color: var(--text-faint);
+    font: 500 0.7rem/1.4 var(--font-sans);
   }
 
   .radar__filters {
+    display: flex;
+    gap: 0.4rem;
     margin-top: 0.4rem;
-  }
-
-  .radar__chips-scroller {
-    display: flex;
-    align-items: center;
-    gap: 0.45rem;
     overflow-x: auto;
-    padding: 0.1rem 0.35rem 0.15rem 0.1rem;
-    -webkit-overflow-scrolling: touch;
-    scroll-padding-inline: 0.35rem;
+    scrollbar-width: none;
   }
 
-  .radar__chips-split {
-    width: 1px;
-    align-self: stretch;
-    min-height: 1.2rem;
-    background: var(--color-rule);
-    flex-shrink: 0;
-    opacity: 0.6;
-  }
-
-  .radar__chips {
-    display: flex;
-    gap: 0.35rem;
-    overflow: visible;
+  .radar__views,
+  .radar__nature {
+    display: inline-flex;
     flex: none;
-    padding: 0;
+    gap: 2px;
+    padding: 2px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius);
+    background: var(--surface-2);
   }
 
-  .radar__chips .radar-chip {
-    box-shadow: 0 1px 3px color-mix(in oklch, var(--color-ink) 5%, transparent);
-    flex: none;
+  .radar-view,
+  .radar-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-height: 2rem;
+    padding: 0.25rem 0.65rem;
+    border: 0;
+    border-radius: calc(var(--radius) - 2px);
+    background: transparent;
+    color: var(--text-muted);
+    font: 550 0.8rem/1 var(--font-sans);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background-color 120ms ease, color 120ms ease;
+  }
+
+  .radar-view:hover,
+  .radar-toggle:hover {
+    color: var(--text);
+  }
+
+  .radar-view[aria-pressed="true"],
+  .radar-toggle[aria-pressed="true"] {
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
+  }
+
+  .radar-view:focus-visible,
+  .radar-toggle:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  .radar-view__n {
+    color: var(--text-faint);
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .radar-toggle .legend-shape {
+    color: var(--text-muted);
   }
 
   .radar__panel {
@@ -1002,17 +918,16 @@ const copyPayload = {
     left: 0;
     right: 0;
     bottom: 0;
-    max-height: min(72dvh, calc(100dvh - var(--app-dock-h) - 5rem));
+    max-height: min(74dvh, calc(100dvh - var(--app-dock-h) - 5rem));
     display: flex;
     flex-direction: column;
     min-height: 0;
-    background: var(--color-surface);
-    border-radius: 1rem 1rem 0 0;
-    box-shadow:
-      0 -4px 16px color-mix(in oklch, var(--color-ink) 6%, transparent),
-      0 -16px 40px color-mix(in oklch, var(--color-ink) 10%, transparent);
+    background: var(--surface);
+    border-top: 1px solid var(--hairline);
+    border-radius: 0.9rem 0.9rem 0 0;
+    box-shadow: var(--shadow-float);
     transform: translateY(110%);
-    transition: transform 0.32s var(--ease-out);
+    transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
   }
 
   .radar__panel.is-open {
@@ -1020,76 +935,108 @@ const copyPayload = {
   }
 
   .radar__handle {
-    width: 2.5rem;
-    height: 0.3rem;
-    margin: 0.6rem auto 0;
+    width: 2.25rem;
+    height: 0.25rem;
+    margin: 0.55rem auto 0;
     border-radius: 99px;
-    background: var(--color-rule-strong);
-    opacity: 0.7;
+    background: var(--hairline-strong, var(--hairline));
   }
 
   .radar__panel-head {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: 0.85rem;
-    padding: 0.5rem 1rem 0.4rem;
+    gap: 0.75rem;
+    padding: 0.55rem 1rem 0.5rem;
+    border-bottom: 1px solid var(--hairline);
     flex-shrink: 0;
+  }
+
+  .radar__panel-head h1 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 640;
+    letter-spacing: -0.015em;
+    line-height: 1.3;
   }
 
   .radar__panel-actions {
     display: flex;
-    gap: 0.55rem;
+    gap: 0.25rem;
     flex-shrink: 0;
   }
 
-  .radar__panel-head h2 {
-    margin: 0;
-    font: 800 1.1rem/1.2 var(--font-display);
-    letter-spacing: -0.035em;
+  #radar-refresh.is-spinning svg {
+    animation: radar-spin 0.8s linear infinite;
+  }
+
+  @keyframes radar-spin {
+    to { transform: rotate(360deg); }
   }
 
   .radar__count,
   .radar__note {
-    margin: 0.3rem 0 0;
-    color: var(--color-muted);
-    font: 525 0.72rem/1.35 var(--font-mono);
+    margin: 0.2rem 0 0;
+    color: var(--text-muted);
+    font-size: 0.76rem;
+    font-variant-numeric: tabular-nums;
   }
 
-  .radar__list {
-    overflow: auto;
+  .radar__scroll {
     flex: 1;
     min-height: 0;
-    -webkit-overflow-scrolling: touch;
+    overflow: auto;
     overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .radar__more-wrap {
+    padding: 0.6rem 1rem 0;
+  }
+
+  .radar__more-wrap:has([hidden]) {
+    display: none;
   }
 
   .radar__panel-foot {
-    padding: 0.7rem 1rem calc(0.9rem + env(safe-area-inset-bottom, 0));
-    border-top: 1px solid var(--color-rule);
+    display: grid;
+    gap: 0.15rem;
+    padding: 0.55rem 1rem calc(0.65rem + env(safe-area-inset-bottom, 0px));
+    border-top: 1px solid var(--hairline);
     flex-shrink: 0;
-    background: linear-gradient(to bottom, transparent, color-mix(in oklch, var(--muted) 20%, var(--color-surface)));
   }
 
-  #radar-more {
-    margin-bottom: 0.5rem;
+  .radar__note {
+    margin: 0;
+  }
+
+  .radar__foot-disclaimer {
+    margin: 0;
+    color: var(--text-faint);
+    font-size: 0.7rem;
   }
 
   .radar__empty {
-    display: grid;
-    gap: 0.75rem;
     margin: 0;
-    padding: 1.4rem 1rem;
-    color: var(--color-muted);
-    font-size: 0.95rem;
-    line-height: 1.45;
+    padding: 1.25rem 1rem;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    line-height: 1.5;
+  }
+
+  .radar__ghost {
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    background: var(--surface);
+    padding: 0.3rem 0.7rem;
+    cursor: pointer;
   }
 
   .radar-skel {
-    height: 4.8rem;
-    margin: 0.65rem 1rem;
-    border-radius: 10px;
-    background: linear-gradient(90deg, var(--color-surface-2), color-mix(in oklch, white 70%, var(--color-surface-2)), var(--color-surface-2));
+    height: 3.25rem;
+    margin: 0.5rem 1rem;
+    border-radius: 8px;
+    background: linear-gradient(90deg, var(--surface-2), var(--surface), var(--surface-2));
     background-size: 200% 100%;
     animation: radar-shimmer 1.1s linear infinite;
   }
@@ -1098,84 +1045,103 @@ const copyPayload = {
     to { background-position: -200% 0; }
   }
 
-  .radar-row__canton {
-    font-weight: 500;
-    color: var(--color-muted);
+  .radar-about {
+    margin-top: 1.25rem;
+    padding: 1rem 1rem 1.25rem;
+    border-top: 1px solid var(--hairline);
+    color: var(--text-muted);
+    font-size: 0.84rem;
+    line-height: 1.55;
+  }
+
+  .radar-about h2,
+  .radar-about h3 {
+    margin: 0 0 0.4rem;
+    color: var(--text);
+    font-size: 0.86rem;
+    font-weight: 620;
+  }
+
+  .radar-about h3 {
+    margin-top: 1rem;
+  }
+
+  .radar-about p {
+    margin: 0 0 0.6rem;
+  }
+
+  .radar-about__links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .radar-about__links a {
+    display: inline-block;
+    padding: 0.25rem 0.55rem;
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 0.78rem;
+    text-decoration: none;
+  }
+
+  .radar-about__links a:hover {
+    background: var(--surface-2);
+  }
+
+  .radar-about details {
+    border-top: 1px solid var(--hairline);
+  }
+
+  .radar-about summary {
+    padding: 0.55rem 0;
+    color: var(--text);
+    font-weight: 550;
+    cursor: pointer;
   }
 
   .radar__sheet {
     position: absolute;
     z-index: 7;
-    left: 0.85rem;
-    right: 0.85rem;
-    bottom: calc(var(--app-dock-h) + 3.8rem);
-    padding: 1rem 1rem 1.1rem;
-    border-radius: var(--radius-lg);
-    background: var(--color-surface);
-    border: 1px solid var(--color-rule);
-    box-shadow:
-      0 8px 24px color-mix(in oklch, var(--color-ink) 8%, transparent),
-      0 20px 48px color-mix(in oklch, var(--color-ink) 12%, transparent);
-    animation: sheet-in 0.28s var(--ease-out) both;
+    left: 0.75rem;
+    right: 0.75rem;
+    bottom: calc(var(--app-dock-h) + 3.75rem);
+    padding: 0.5rem 0.5rem 0.75rem;
+    border: 1px solid var(--hairline);
+    border-radius: calc(var(--radius) + 2px);
+    background: var(--surface);
+    box-shadow: var(--shadow-float);
+    animation: sheet-in 0.25s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+
+  .radar__sheet .radar-item {
+    border-top: 0;
+    padding-right: 2.75rem;
+  }
+
+  .radar__sheet .mt-3 {
+    margin: 0.5rem 0.5rem 0;
+    width: calc(100% - 1rem);
   }
 
   @keyframes sheet-in {
-    from {
-      opacity: 0;
-      transform: translateY(8px) scale(0.98);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0) scale(1);
-    }
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
   }
 
   .radar__sheet[hidden] {
     display: none !important;
   }
 
-  .radar__sheet h2 {
-    margin: 0;
-    padding-right: 2.6rem;
-    font: 800 1.1rem/1.25 var(--font-display);
-    letter-spacing: -0.025em;
-  }
-
-  .radar__sheet p {
-    margin: 0.55rem 0 0;
-    color: var(--color-muted);
-    font-size: 0.9rem;
-    line-height: 1.5;
-  }
-
   .radar__sheet-x {
     position: absolute;
-    top: 0.5rem;
-    right: 0.5rem;
-    display: grid;
-    place-items: center;
-    width: 42px;
-    height: 42px;
-    border: 0;
-    border-radius: var(--radius);
-    background: var(--color-surface-2);
-    color: var(--color-muted);
-    cursor: pointer;
-    transition: background var(--dur-fast) var(--ease-out),
-                color var(--dur-fast) var(--ease-out);
-  }
-
-  .radar__sheet-x:hover {
-    background: var(--color-rule);
-    color: var(--color-ink);
-  }
-
-  .radar__sheet-x svg {
-    width: 1.1rem;
-    height: 1.1rem;
-    stroke: currentColor;
-    stroke-width: 2.2;
-    stroke-linecap: round;
+    top: 0.4rem;
+    right: 0.4rem;
+    z-index: 1;
   }
 
   .radar__fab {
@@ -1183,22 +1149,7 @@ const copyPayload = {
     z-index: 6;
     right: 0.9rem;
     bottom: calc(var(--app-dock-h) + 0.9rem);
-    box-shadow:
-      0 4px 12px color-mix(in oklch, var(--color-ink) 12%, transparent),
-      0 12px 28px color-mix(in oklch, var(--color-ink) 18%, transparent);
-    transition: transform var(--dur-fast) var(--ease-out),
-                box-shadow var(--dur-short) var(--ease-out);
-  }
-
-  .radar__fab:hover {
-    transform: translateY(-2px);
-    box-shadow:
-      0 6px 16px color-mix(in oklch, var(--color-ink) 14%, transparent),
-      0 16px 36px color-mix(in oklch, var(--color-ink) 20%, transparent);
-  }
-
-  .radar__fab:active {
-    transform: translateY(0) scale(0.97);
+    box-shadow: var(--shadow-float);
   }
 
   .radar__fab[hidden] {
@@ -1207,28 +1158,23 @@ const copyPayload = {
 
   .radar__fab b {
     min-width: 1.5rem;
-    padding: 0.14rem 0.45rem;
-    border-radius: var(--radius-sm);
+    padding: 0.12rem 0.45rem;
+    border-radius: 4px;
     background: rgb(255 255 255 / 0.18);
-    font: 675 0.7rem/1.2 var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 620;
     font-variant-numeric: tabular-nums;
   }
 
-  .seo-feed-index {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border: 0;
+  @media (max-width: 419px) {
+    /* Give the search field the room; the dock already says where we are. */
+    .radar__brand { display: none; }
+    .radar__hud-bar { grid-template-columns: minmax(0, 1fr) auto; }
   }
 
   @media (prefers-reduced-motion: reduce) {
     .radar__panel { transition: none; }
-    .radar-skel { animation: none; }
+    .radar-skel, #radar-refresh.is-spinning svg { animation: none; }
   }
 
   @media (min-width: 900px) {
@@ -1239,7 +1185,7 @@ const copyPayload = {
 
     .radar {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(22rem, 26rem);
+      grid-template-columns: minmax(0, 1fr) minmax(23rem, 27rem);
       grid-template-rows: auto minmax(0, 1fr);
       grid-template-areas:
         "map hud"
@@ -1250,86 +1196,67 @@ const copyPayload = {
 
     .radar__hud {
       grid-area: hud;
-      padding: 0;
-      pointer-events: auto;
+      padding: 0.75rem 1rem 0.6rem;
+      background: var(--surface);
+      border-bottom: 1px solid var(--hairline);
     }
 
     .radar__hud-bar {
-      border-radius: 0;
-      box-shadow: none;
+      grid-template-columns: minmax(0, 1fr);
+      padding: 0;
       border: 0;
-      border-bottom: 1px solid var(--color-rule);
-      background: var(--color-surface);
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
       backdrop-filter: none;
-      padding: 0.55rem 0.9rem;
-      grid-template-columns: 1fr;
     }
 
     .radar__brand,
-    .radar__handle {
+    .radar__handle,
+    .radar__hud-bar .app-langs--hud {
       display: none;
+    }
+
+    .radar__kbd {
+      display: inline-block;
     }
 
     .radar__filters {
-      margin: 0;
-      padding: 0.35rem 0.9rem 0.45rem;
-      background: var(--color-surface);
-      border-bottom: 1px solid var(--color-rule);
-    }
-
-    .radar__chips-scroller {
-      display: grid;
-      gap: 0.3rem;
-      overflow: visible;
-      padding: 0;
-      mask-image: none;
-    }
-
-    .radar__chips-split {
-      display: none;
-    }
-
-    .radar__chips {
-      margin: 0;
-      padding: 0;
-      background: transparent;
-      border: 0;
-      mask-image: none;
       flex-wrap: wrap;
+      margin-top: 0.6rem;
       overflow: visible;
-    }
-
-    .radar__chips .radar-chip {
-      box-shadow: none;
     }
 
     .radar__map-wrap {
       position: relative;
       grid-area: map;
       min-height: 0;
-      border-right: 1px solid var(--color-rule);
+      border-right: 1px solid var(--hairline);
     }
 
     .radar__legend {
       display: flex;
-      bottom: 0.75rem;
     }
 
     .radar__disclaimer {
       display: block;
       position: absolute;
       left: 0.75rem;
-      bottom: 2.35rem;
+      bottom: 2.75rem;
       z-index: 3;
-      margin: 0;
       max-width: 17rem;
-      padding: 0.5rem 0.65rem;
-      border-radius: var(--radius-md);
-      background: color-mix(in oklch, var(--color-surface) 92%, transparent);
-      color: var(--color-muted);
+      margin: 0;
+      padding: 0.45rem 0.65rem;
+      border-radius: var(--radius);
+      background: color-mix(in oklch, var(--surface) 92%, transparent);
+      color: var(--text-muted);
       font-size: 0.7rem;
       line-height: 1.4;
       pointer-events: none;
+    }
+
+    .radar__foot-disclaimer {
+      display: none;
     }
 
     .radar__panel {
@@ -1339,6 +1266,7 @@ const copyPayload = {
       height: 100%;
       min-height: 0;
       transform: none;
+      border-top: 0;
       border-radius: 0;
       box-shadow: none;
       transition: none;
@@ -1348,14 +1276,6 @@ const copyPayload = {
     .radar__fab,
     .radar__sheet {
       display: none !important;
-    }
-
-    .radar__panel-head {
-      padding-top: 0.7rem;
-    }
-
-    .radar__panel-foot {
-      padding-bottom: 0.85rem;
     }
   }
 </style>

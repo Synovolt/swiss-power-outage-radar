@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { eventHreflangHrefMap, eventHreflangLinkTags, eventSeo, INDEXABLE_ROBOTS, renderEventSeoMarkup, renderHomeFeedLinks } from "../src/seo-event-page";
+import { eventHreflangHrefMap, eventHreflangLinkTags, eventSeo, INDEXABLE_ROBOTS, renderEventSeoMarkup } from "../src/seo-event-page";
+import { renderHomeAbout } from "../src/seo-home";
 import type { PublicEventDetail } from "../src/public-detail";
 
 function detail(): PublicEventDetail {
@@ -253,11 +254,14 @@ describe("SEO event page", () => {
     expect(html).toContain("Zählung auf outage.ch, nicht die komplette Betriebsstatistik des Werks.");
   });
 
-  it("exposes crawlable homepage answers without hiding them from extractors", () => {
-    const html = renderHomeFeedLinks([]);
+  it("exposes crawlable homepage answers as visible content, not hidden SEO text", () => {
+    const html = renderHomeAbout("de");
     expect(html).not.toContain("aria-hidden");
+    expect(html).not.toContain("sr-only");
     expect(html).toContain("Was outage.ch zeigt");
     expect(html).toContain("/netzbetreiber/");
+    expect(html).toContain("/statistik/");
+    expect(html).toContain("/stromausfall/");
     expect(html).toContain("Ist outage.ch ein offizieller Störungsdienst?");
   });
 });
