@@ -633,6 +633,8 @@ const u = (key: string, options?: Record<string, unknown>) => t(locale, `ui.home
 
     // ------------------------------------------------------------- data
     function applyIndex(payload: any) {
+      // A browser-cached copy older than what is already shown must not replace it.
+      if (payload?.generatedAt && state.generatedAt && payload.generatedAt < state.generatedAt) return;
       state.items = fromIndex(payload);
       state.generatedAt = payload?.generatedAt ?? new Date().toISOString();
       state.partial = Boolean(payload?.partial);
@@ -645,7 +647,8 @@ const u = (key: string, options?: Record<string, unknown>) => t(locale, `ui.home
       state.loading = true;
       if (manual) document.querySelector("#radar-refresh")?.classList.add("is-spinning");
       try {
-        const response = await fetch("/api/public/index.json", { headers: { Accept: "application/json" } });
+        // "no-cache" revalidates with the edge: the browser's own copy may be old.
+        const response = await fetch("/api/public/index.json", { headers: { Accept: "application/json" }, cache: "no-cache" });
         if (!response.ok) throw new Error(String(response.status));
         applyIndex(await response.json());
       } catch {

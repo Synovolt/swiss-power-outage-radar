@@ -37,7 +37,7 @@ Budget-Regeln für öffentliche Seiten (Free Plan: 10 ms CPU pro Request, 50 ext
 
 - Teure Lesepfade gehen über eine vorberechnete Zeile in \`public_stats_cache\`: Startseite und Index, Statistik, Ortsliste und Betreiber-Kennzahlen. Ein Cache-Miss liest dann eine Zeile statt hunderter.
 - Orts- und Kantonsseiten lesen nur indexierte Ausschnitte (\`place_slug\`, \`canton\`). Die Betreiber-Übersicht und die Sitemap lesen Spalten statt JSON, damit kein Parsing von Hunderten Items im 10-ms-Budget nötig ist.
-- Antworten werden per Cache API an der Edge gecacht (60 s bis 10 min, \`stale-while-revalidate\`). \`PUBLIC_CACHE_VERSION\` in \`src/index.ts\` hochzählen, wenn sich Markup ändert.
+- Antworten werden per Cache API an der Edge gecacht (60 s bis 10 min, \`stale-while-revalidate\`). Der Cache-Schlüssel enthält die Worker-Version (\`CF_VERSION_METADATA\`), jeder Deploy beginnt also mit leerem Edge-Cache. \`PUBLIC_CACHE_VERSION\` in \`src/index.ts\` nur hochzählen, um ohne Deploy alles zu verwerfen. Die Zonen-Einstellung «Browser Cache TTL» würde \`max-age\` auf Cache-Treffern auf 4 h hochsetzen; der Worker stellt den vorgesehenen Wert deshalb aus \`X-Outage-Cache-Control\` wieder her (\`src/edge-cache.ts\`).
 - Der Cron schreibt nur geänderte Projektionszeilen. Zeitabhängige Zeilen werden gelesen, aber nur bei Änderung geschrieben. Der Orphan-Sweep läuft stündlich.
 
 ## Setup
