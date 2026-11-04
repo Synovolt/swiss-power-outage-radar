@@ -19,6 +19,7 @@ import RadarIcon from "@tabler/icons/outline/radar-2.svg";
 import Building from "@tabler/icons/outline/building.svg";
 import Book from "@tabler/icons/outline/book-2.svg";
 import FirstAid from "@tabler/icons/outline/first-aid-kit.svg";
+import { IMPRINT_PATH, LEGAL_LABELS, PRIVACY_PATH, legalPath } from "../legal";
 import MapPin from "@tabler/icons/outline/map-pin.svg";
 
 interface Props {
@@ -146,6 +147,8 @@ const nav = [
               <a href={pathFor({ kind: "guides" }, locale)}>{t(locale, "nav.guides")}</a>
               <a href={HELP_GUIDE_PATH}>{t(locale, "nav.help")}</a>
               <a href={pathFor({ kind: "about" }, locale)}>{t(locale, "nav.about")}</a>
+              <a href={legalPath(IMPRINT_PATH, locale)}>{LEGAL_LABELS[locale].imprint}</a>
+              <a href={legalPath(PRIVACY_PATH, locale)}>{LEGAL_LABELS[locale].privacy}</a>
             </nav>
           </footer>
         )}

@@ -5,6 +5,7 @@
  * the compact index for instant client-side search, and a meta description
  * with today's numbers.
  */
+import { IMPRINT_PATH, LEGAL_LABELS, PRIVACY_PATH, legalPath } from "./legal";
 import { escapeHtml, fetchTemplate, inlineJson, renderedHeaders, setMetaContent } from "./html";
 import { formatAppDate, homeFaqs, pathFor, radarViewCopy, t, type AppLocale } from "./i18n";
 import { DEFAULT_OG_IMAGE_PATH, SITE_ORIGIN, absoluteUrl } from "./public-url";
@@ -69,6 +70,7 @@ export function renderHomeAbout(locale: AppLocale): string {
     + `<ul class="radar-about__links">${links.map(([href, label]) => `<li><a href="${escapeHtml(href)}">${escapeHtml(label)}</a></li>`).join("")}</ul>`
     + `<h3>${escapeHtml(t(locale, "home.seoFaq"))}</h3>`
     + homeFaqs(locale).map((faq) => `<details><summary>${escapeHtml(faq.question)}</summary><p>${escapeHtml(faq.answer)}</p></details>`).join("")
+    + `<p class="radar-about__legal"><a href="${escapeHtml(legalPath(IMPRINT_PATH, locale))}">${escapeHtml(LEGAL_LABELS[locale].imprint)}</a> · <a href="${escapeHtml(legalPath(PRIVACY_PATH, locale))}">${escapeHtml(LEGAL_LABELS[locale].privacy)}</a></p>`
     + `</section>`;
 }
 

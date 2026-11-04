@@ -1,0 +1,97 @@
+---
+import RadarLayout from "../../../layouts/RadarLayout.astro";
+import PageHero from "@/components/app/PageHero.astro";
+import { Prose } from "@/components/starwind/prose";
+import { SITE_ORIGIN, absoluteUrl } from "../../../public-url";
+import { IMPRINT_PATH, LEGAL_ENTITY, LEGAL_LABELS, PRIVACY_PATH, legalPath } from "../../../legal";
+import { localeFromParam, localeStaticPaths, pathFor, type AppLocale } from "../../../i18n";
+
+export function getStaticPaths() {
+  return localeStaticPaths();
+}
+
+const locale: AppLocale = Astro.props.locale ?? localeFromParam(
+  Array.isArray(Astro.params.locale) ? Astro.params.locale[0] : Astro.params.locale
+);
+const label = LEGAL_LABELS[locale];
+const COPY: Record<AppLocale, { lede: string; operator: string; contact: string; register: string; disclaimerH: string; disclaimer: string; sourcesH: string; sources: string; privacy: string }> = {
+  de: {
+    lede: "Angaben zur Betreiberin von outage.ch.",
+    operator: "Betreiberin",
+    contact: "Kontakt",
+    register: "Handelsregister",
+    disclaimerH: "Haftung",
+    disclaimer: "outage.ch fasst öffentlich zugängliche Meldungen von Netzbetreibern, Behörden und Medien zusammen. Die Inhalte werden sorgfältig, aber automatisch zusammengestellt; für Richtigkeit, Vollständigkeit und Aktualität wird keine Gewähr übernommen. Verbindlich sind die Angaben des zuständigen Netzbetreibers. outage.ch ist kein Notfallkanal: Im Notfall 112, 118 oder 144 wählen.",
+    sourcesH: "Quellen und Rechte",
+    sources: "Meldungen werden mit Quelle und Link zur Originalmeldung wiedergegeben. Kartengrundlage: © swisstopo. Alertswiss-Daten: Quelle www.alertswiss.ch. Rechteinhaber, die eine Wiedergabe beanstanden, melden sich bitte per E-Mail.",
+    privacy: "Wie outage.ch mit Personendaten umgeht, steht in der Datenschutzerklärung."
+  },
+  fr: {
+    lede: "Informations sur l'exploitante d'outage.ch.",
+    operator: "Exploitante",
+    contact: "Contact",
+    register: "Registre du commerce",
+    disclaimerH: "Responsabilité",
+    disclaimer: "outage.ch résume des signalements publics de gestionnaires de réseau, d'autorités et de médias. Les contenus sont compilés avec soin mais automatiquement ; aucune garantie n'est donnée quant à leur exactitude, exhaustivité ou actualité. Les indications du gestionnaire de réseau compétent font foi. outage.ch n'est pas un canal d'urgence : en cas d'urgence, appelez le 112, 118 ou 144.",
+    sourcesH: "Sources et droits",
+    sources: "Les signalements sont repris avec leur source et un lien vers l'original. Fond de carte : © swisstopo. Données Alertswiss : source www.alertswiss.ch. Les ayants droit qui contestent une reprise peuvent nous écrire.",
+    privacy: "Le traitement des données personnelles est décrit dans la déclaration de protection des données."
+  },
+  it: {
+    lede: "Informazioni sulla gestrice di outage.ch.",
+    operator: "Gestrice",
+    contact: "Contatto",
+    register: "Registro di commercio",
+    disclaimerH: "Responsabilità",
+    disclaimer: "outage.ch riassume segnalazioni pubbliche di gestori di rete, autorità e media. I contenuti sono raccolti con cura ma in modo automatico; non si garantisce la loro esattezza, completezza o attualità. Fanno fede le indicazioni del gestore di rete competente. outage.ch non è un canale d'emergenza: in caso d'emergenza chiami il 112, 118 o 144.",
+    sourcesH: "Fonti e diritti",
+    sources: "Le segnalazioni sono riprese con fonte e link all'originale. Base cartografica: © swisstopo. Dati Alertswiss: fonte www.alertswiss.ch. I titolari di diritti che contestano una ripresa possono scriverci.",
+    privacy: "Il trattamento dei dati personali è descritto nella dichiarazione sulla protezione dei dati."
+  },
+  en: {
+    lede: "Information about the operator of outage.ch.",
+    operator: "Operator",
+    contact: "Contact",
+    register: "Commercial register",
+    disclaimerH: "Liability",
+    disclaimer: "outage.ch summarises public reports from grid operators, authorities and media. The content is compiled carefully but automatically; no guarantee is given for accuracy, completeness or timeliness. The responsible grid operator's information is authoritative. outage.ch is not an emergency channel: in an emergency call 112, 118 or 144.",
+    sourcesH: "Sources and rights",
+    sources: "Reports are reproduced with their source and a link to the original. Base map: © swisstopo. Alertswiss data: source www.alertswiss.ch. Rights holders who object to a reproduction can contact us by email.",
+    privacy: "How outage.ch handles personal data is described in the privacy policy."
+  }
+};
+const copy = COPY[locale];
+const canonical = absoluteUrl(legalPath(IMPRINT_PATH, locale), SITE_ORIGIN);
+---
+
+<RadarLayout title={`${label.imprint} | outage.ch`} description={copy.lede} canonical={canonical} robots="index,follow" shell="content" locale={locale}>
+  <article class="mx-auto w-full max-w-4xl">
+    <PageHero kicker="outage.ch" title={label.imprint} lede={copy.lede} />
+    <Prose class="max-w-none text-sm md:text-[0.95rem]">
+      <section>
+        <h2>{copy.operator}</h2>
+        <p>
+          {LEGAL_ENTITY.name}<br />
+          {LEGAL_ENTITY.street}<br />
+          {LEGAL_ENTITY.town}<br />
+          {LEGAL_ENTITY.country}
+        </p>
+        <p>{copy.register}: <a href={LEGAL_ENTITY.register} rel="noopener">{LEGAL_ENTITY.uid}</a></p>
+      </section>
+      <section>
+        <h2>{copy.contact}</h2>
+        <p><a href={`mailto:${LEGAL_ENTITY.email}`}>{LEGAL_ENTITY.email}</a></p>
+      </section>
+      <section>
+        <h2>{copy.disclaimerH}</h2>
+        <p>{copy.disclaimer}</p>
+      </section>
+      <section>
+        <h2>{copy.sourcesH}</h2>
+        <p>{copy.sources}</p>
+      </section>
+      <p><a href={legalPath(PRIVACY_PATH, locale)}>{label.privacy}</a> · <a href={pathFor({ kind: "about" }, locale)}>outage.ch</a></p>
+      <p class="text-muted-foreground">{copy.privacy}</p>
+    </Prose>
+  </article>
+</RadarLayout>
