@@ -146,12 +146,13 @@ describe("SEO event page", () => {
     active.item.active_since_is_minimum = false;
     active.item.last_confirmed_active_at = "2026-07-29T09:00:00.000Z";
 
-    const html = renderEventSeoMarkup(active);
-    expect(html).toContain("hero-statusline");
-    expect(html).toContain("Noch aktiv · Beginn gemeldet");
-    expect(html).toContain("zuletzt bestätigt");
+    const html = renderEventSeoMarkup(active, [], null, "de", Date.parse("2026-07-29T09:30:00.000Z"));
+    expect(html).toContain("Läuft seit 3 Std. 30 Min. · Ende noch offen");
+    expect(html).toContain("Zuletzt bestätigt");
     expect(html).not.toContain("<dt>Dauer</dt>");
-    expect(html.indexOf("hero-statusline")).toBeLessThan(html.indexOf("<h1>"));
+    // The answer comes right after the title, before facts, sources and FAQ.
+    expect(html.indexOf("ev-headline")).toBeGreaterThan(html.indexOf("<h1>"));
+    expect(html.indexOf("ev-headline")).toBeLessThan(html.indexOf("ev-facts"));
   });
 
   it("distinguishes a reported resolution from an exact restoration time", () => {
@@ -164,9 +165,10 @@ describe("SEO event page", () => {
     resolved.item.summary = "Ein Gewitter verursachte den Ausfall.";
 
     const html = renderEventSeoMarkup(resolved);
+    expect(html).toContain("Als behoben gemeldet");
     expect(html).toContain("Behoben gemeldet · Zeitpunkt unbekannt");
-    expect(html).toContain("<span>Gemeldet</span><h3>Betroffenes Gebiet</h3>");
-    expect(html).toContain("Der genaue Zeitpunkt ist nicht öffentlich bestätigt.");
+    expect(html).toContain("<dt>Ende</dt><dd>Behoben gemeldet · Zeitpunkt unbekannt</dd>");
+    expect(html).not.toContain("<dt>Dauer</dt>");
     expect(html).not.toContain("Ein Gewitter verursachte den Ausfall.");
   });
 
@@ -181,7 +183,7 @@ describe("SEO event page", () => {
     const html = renderEventSeoMarkup(closed);
     expect(html).toContain("Automatisch abgeschlossen");
     expect(html).toContain("Dauer unbekannt");
-    expect(html).toContain("Ende / Wiederherstellung</h3><p>Nicht bekannt");
+    expect(html).toContain("<dt>Ende</dt><dd>unbekannt</dd>");
     expect(html).not.toContain("Behoben gemeldet · Zeitpunkt unbekannt");
     expect(html).not.toContain("<dt>Dauer</dt>");
   });
@@ -202,7 +204,7 @@ describe("SEO event page", () => {
     expect(html).toContain("Offizielle Seite");
   });
 
-  it("shows operator radar stats and related events on the incident page", () => {
+  it("links the operator and lists related events on the incident page", () => {
     const withOperator = detail();
     withOperator.operator = {
       name: "ewz",
@@ -246,12 +248,11 @@ describe("SEO event page", () => {
       }]
     };
     const html = renderEventSeoMarkup(withOperator, live.recent, live);
-    expect(html).toContain("Öffentliche Meldungen");
-    expect(html).toContain(">4<");
-    expect(html).toContain("4 öffentliche Meldungen im Radar, davon 1 aktiv.");
+    // Operator statistics live on the operator page; the incident page links there and lists related reports.
+    expect(html).toContain("/netzbetreiber/ewz/");
     expect(html).toContain("Weitere Meldungen von ewz");
     expect(html).toContain("/stromausfall/seefeld-41");
-    expect(html).toContain("Zählung auf outage.ch, nicht die komplette Betriebsstatistik des Werks.");
+    expect(html).toContain('class="radar-item radar-item--active"');
   });
 
   it("exposes crawlable homepage answers as visible content, not hidden SEO text", () => {

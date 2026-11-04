@@ -18,6 +18,11 @@
   transition: transform var(--dur-short) var(--ease-out);
 }
 
+.skip-link:not(:focus) {
+  box-shadow: none;
+  opacity: 0;
+}
+
 .skip-link:focus {
   transform: none;
 }

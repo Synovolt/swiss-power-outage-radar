@@ -146,7 +146,7 @@ function renderStatusPage(status: Awaited<ReturnType<typeof getPublicStatus>>): 
 <h2>Letzte Event-Akten</h2><table><thead><tr><th>Zeit</th><th>Ort</th><th>Status</th><th>Quellen</th><th>Confidence</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="6">Keine Event-Akten.</td></tr>`}</tbody></table></main></body></html>`;
 }
 
-const PUBLIC_CACHE_VERSION = "seo-v9";
+const PUBLIC_CACHE_VERSION = "seo-v10";
 
 function publicCacheRequest(request: Request): Request {
   const url = new URL(request.url);

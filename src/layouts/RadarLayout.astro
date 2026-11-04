@@ -51,7 +51,6 @@ const {
 const eyebrow = Astro.props.eyebrow ?? t(locale, "site.eyebrow");
 const pageDescription = description ?? t(locale, "site.description");
 const canonicalUrl = canonical ?? absoluteUrl(Astro.url.pathname, SITE_ORIGIN);
-const hideTopOnRadarMobile = shell === "radar";
 const htmlLang = HTML_LANG[locale];
 const indexable = !robots?.includes("noindex");
 const alternates = indexable ? hreflangEntries(Astro.url.pathname, SITE_ORIGIN) : [];
@@ -100,10 +99,10 @@ const nav = [
     <slot name="head" />
     <title>{title}</title>
   </head>
-  <body class:list={["text-foreground", "shell-app", hideTopOnRadarMobile && "shell-radar"]}>
+  <body class:list={["text-foreground", "shell-app", shell === "radar" && "shell-radar"]}>
     <a class="skip-link" href="#app-main">{t(locale, "nav.skip")}</a>
     <div class="app-frame">
-      <header class:list={["app-top", hideTopOnRadarMobile && "app-top--radar-desktop-only"]}>
+      <header class="app-top">
         <a class="app-top__brand" href={homeHref} aria-label={t(locale, "nav.brandAria")}>
           <span class="app-top__mark" aria-hidden="true">
             <Bolt class="size-4" />
@@ -133,14 +132,21 @@ const nav = [
       <main id="app-main" class:list={["app-main", shell === "radar" ? "app-main--radar" : "app-main--content"]}>
         <slot />
         {shell === "content" && (
-          <nav class="app-footnav" aria-label={t(locale, "nav.morePages")}>
-            <span class="app-footnav__brand">outage.ch</span>
-            <a href={pathFor({ kind: "about" }, locale)}>{t(locale, "nav.about")}</a>
-            <a href={HELP_GUIDE_PATH}>{t(locale, "nav.help")}</a>
-            <a href={pathFor({ kind: "stats" }, locale)}>{t(locale, "data.nav.stats")}</a>
-            <a href={pathFor({ kind: "operators" }, locale)}>{t(locale, "nav.operators")}</a>
-            <a href={pathFor({ kind: "guides" }, locale)}>{t(locale, "nav.guides")}</a>
-          </nav>
+          <footer class="app-foot">
+            <div class="app-foot__brand">
+              <strong>outage.ch</strong>
+              <p>{t(locale, "home.disclaimer")}</p>
+            </div>
+            <nav class="app-foot__links" aria-label={t(locale, "nav.morePages")}>
+              <a href={homeHref}>{t(locale, "nav.radar")}</a>
+              <a href={pathFor({ kind: "places" }, locale)}>{t(locale, "data.nav.places")}</a>
+              <a href={pathFor({ kind: "stats" }, locale)}>{t(locale, "data.nav.stats")}</a>
+              <a href={pathFor({ kind: "operators" }, locale)}>{t(locale, "nav.operators")}</a>
+              <a href={pathFor({ kind: "guides" }, locale)}>{t(locale, "nav.guides")}</a>
+              <a href={HELP_GUIDE_PATH}>{t(locale, "nav.help")}</a>
+              <a href={pathFor({ kind: "about" }, locale)}>{t(locale, "nav.about")}</a>
+            </nav>
+          </footer>
         )}
       </main>
 
