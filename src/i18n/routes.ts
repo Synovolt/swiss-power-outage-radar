@@ -108,7 +108,7 @@ export function pathFor(route: AppRoute, locale: AppLocale = "de"): string {
 
 /** Static shells that only exist to be filled by the Worker; never served directly. */
 export function templateShellTarget(pathname: string): string | null {
-  const shell = pathname.match(/^(?:\/(fr|it|en))?\/(?:events|data-template)\/?$/);
+  const shell = pathname.match(/^(?:\/(fr|it|en))?\/(?:events|data-template|not-found)\/?$/);
   if (!shell) return null;
   return shell[1] ? `/${shell[1]}/` : "/";
 }

@@ -257,6 +257,10 @@ export const de = {
       "4": {
         q: "Nennt outage.ch eine genaue Wiederherstellungszeit?",
         a: "Nur wenn eine öffentliche Quelle sie bestätigt. Fehlende Endzeiten werden als offen gekennzeichnet. Schätzungen werden nicht als Tatsache dargestellt."
+      },
+      "5": {
+        q: "Deckt outage.ch die ganze Schweiz ab?",
+        a: "Noch nicht. Gut abgedeckt sind die Gebiete von BKW, Romande Energie, ewl Luzern, SES, AIL und weiteren Werken mit öffentlichen Störungsseiten. Viele Werke, etwa in Zürich, der Zentral- und Ostschweiz, veröffentlichen keine maschinenlesbaren Meldungen. Keine Meldung auf outage.ch heisst dort nicht, dass es keinen Ausfall gibt: Massgebend ist die Seite Ihres Netzbetreibers."
       }
     }
   },
@@ -689,6 +693,10 @@ export const fr: Catalog = {
       "4": {
         q: "outage.ch indique-t-il une heure de rétablissement précise ?",
         a: "Seulement si une source publique la confirme. Les heures de fin manquantes sont marquées comme ouvertes. Les estimations ne sont pas présentées comme des faits."
+      },
+      "5": {
+        q: "outage.ch couvre-t-il toute la Suisse ?",
+        a: "Pas encore. Les zones de BKW, Romande Energie, ewl Lucerne, SES, AIL et d'autres gestionnaires publiant leurs dérangements sont bien couvertes. Beaucoup de gestionnaires, par exemple à Zurich, en Suisse centrale et orientale, ne publient pas de signalements exploitables. Là-bas, l'absence de signalement sur outage.ch ne signifie pas qu'il n'y a pas de panne : la page de votre gestionnaire de réseau fait foi."
       }
     }
   },

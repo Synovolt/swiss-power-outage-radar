@@ -53,10 +53,12 @@ import {
   canonicalRoutePath,
   dePrefixTarget,
   eventCanonicalRedirect,
+  localePrefix,
   parseAppPath,
   parseLocaleFromPath,
   t,
-  templateShellTarget
+  templateShellTarget,
+  type AppLocale
 } from "./i18n";
 import { publicEventIdFromPath } from "./public-url";
 import {
@@ -86,7 +88,7 @@ import {
 } from "./public-stats";
 import { cantonBySlug } from "./swiss-cantons";
 import { isBearerAuthorized } from "./auth";
-import { escapeHtml } from "./html";
+import { escapeHtml, fetchTemplate } from "./html";
 import type { Env } from "./types";
 
 function json(data: unknown, init?: ResponseInit): Response {
@@ -205,6 +207,17 @@ async function readPlaces(env: Env): Promise<PlacesPayload | null> {
   return (await readStatsCache<PlacesPayload>(env.DB, PLACES_CACHE_KEY))?.payload ?? null;
 }
 
+/** 404 with the site's own page (static template, no D1), plain text if the template is missing. */
+async function notFoundPage(env: Env, request: Request, locale: AppLocale): Promise<Response> {
+  const headers = { "Cache-Control": "public,max-age=300", "X-Robots-Tag": "noindex" };
+  const template = await fetchTemplate(env.ASSETS, new URL(`${localePrefix(locale)}/not-found/`, request.url)).catch(() => null);
+  if (!template?.ok) return new Response(t(locale, "notFound"), { status: 404, headers });
+  return new Response(request.method === "HEAD" ? null : template.body, {
+    status: 404,
+    headers: { ...headers, "Content-Type": "text/html; charset=utf-8" }
+  });
+}
+
 /** Keeps the public projection in step after an admin action changed events. */
 async function republish(env: Env, eventIds: number[]): Promise<void> {
   const projection = await refreshPublicProjection(env, { eventIds });
@@ -240,6 +253,8 @@ const app = {
       if (strippedDe) return Response.redirect(new URL(strippedDe + url.search, publicOrigin).toString(), 301);
       const shell = templateShellTarget(url.pathname);
       if (shell) return Response.redirect(new URL(shell + url.search, publicOrigin).toString(), 301);
+      // Browsers and crawlers ask for /favicon.ico regardless of the <link rel="icon">.
+      if (url.pathname === "/favicon.ico") return Response.redirect(new URL("/favicon.svg", publicOrigin).toString(), 301);
     }
 
     if (request.method === "GET" && isCacheablePublicPath(url.pathname)) {
@@ -253,7 +268,7 @@ const app = {
       const detail = await loadPublicEventDetail(env, Number(legacyEvent[1]));
       if (!detail) {
         const merged = await mergedEventRedirect(env, Number(legacyEvent[1]), publicOrigin);
-        return merged ?? new Response("Event nicht gefunden", { status: 404 });
+        return merged ?? notFoundPage(env, request, "de");
       }
       return Response.redirect(new URL(detail.item.url, publicOrigin).toString(), 301);
     }
@@ -268,7 +283,7 @@ const app = {
         if (!detail || !eventId) {
           // Duplicates folded into another incident keep their URL as a redirect.
           const merged = eventId ? await mergedEventRedirect(env, eventId, publicOrigin) : null;
-          return merged ?? new Response(t(locale, "notFound"), { status: 404 });
+          return merged ?? notFoundPage(env, request, locale);
         }
         const redirectTo = eventCanonicalRedirect(url.pathname, detail.item.url);
         if (redirectTo) return Response.redirect(new URL(redirectTo + url.search, publicOrigin).toString(), 301);
@@ -319,7 +334,7 @@ const app = {
       if (route.route.kind === "place") {
         const slug = route.route.slug;
         const place = await getPublicPlace(env.DB, slug);
-        if (!place) return new Response(t(locale, "notFound"), { status: 404, headers: { "Cache-Control": "public,max-age=300" } });
+        if (!place) return notFoundPage(env, request, locale);
         const [slice, items, places] = await Promise.all([
           summarizePublicSlice(env.DB, { placeSlug: slug }),
           listPublicItems(env.DB, { placeSlug: slug, limit: 60 }),
@@ -340,7 +355,7 @@ const app = {
 
       if (route.route.kind === "canton") {
         const canton = cantonBySlug(route.route.slug);
-        if (!canton) return new Response(t(locale, "notFound"), { status: 404 });
+        if (!canton) return notFoundPage(env, request, locale);
         const [slice, items, places, operators] = await Promise.all([
           summarizePublicSlice(env.DB, { canton: canton.code }),
           listPublicItems(env.DB, { canton: canton.code, limit: 60 }),
@@ -696,8 +711,8 @@ const app = {
       return json({ ok: true, result: await runAlertCheck(env) });
     }
 
-    if (route && request.method === "GET") {
-      return new Response(t(parseLocaleFromPath(url.pathname), "notFound"), { status: 404 });
+    if (isRead && !url.pathname.startsWith("/api/") && !url.pathname.startsWith("/admin/")) {
+      return notFoundPage(env, request, parseLocaleFromPath(url.pathname));
     }
     return json({ error: "Not found" }, { status: 404 });
   },

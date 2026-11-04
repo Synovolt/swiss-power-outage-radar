@@ -27,7 +27,7 @@ export function t(locale: AppLocale, key: string, options?: Record<string, unkno
 }
 
 export function homeFaqs(locale: AppLocale = "de"): Array<{ question: string; answer: string }> {
-  return (["1", "2", "3", "4"] as const).map((id) => ({
+  return (["1", "2", "3", "4", "5"] as const).map((id) => ({
     question: t(locale, `home.faq.${id}.q`),
     answer: t(locale, `home.faq.${id}.a`)
   }));

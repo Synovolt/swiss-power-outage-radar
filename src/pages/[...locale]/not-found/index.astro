@@ -1,0 +1,63 @@
+---
+// Template for every 404 the Worker answers (see notFoundPage in src/index.ts).
+// Static, so it renders even when D1 is unavailable. Direct visits redirect home.
+import RadarLayout from "../../../layouts/RadarLayout.astro";
+import PageHero from "@/components/app/PageHero.astro";
+import { HELP_GUIDE_PATH, localeFromParam, localeStaticPaths, pathFor, t, type AppLocale } from "../../../i18n";
+
+export function getStaticPaths() {
+  return localeStaticPaths();
+}
+
+const locale: AppLocale = Astro.props.locale ?? localeFromParam(
+  Array.isArray(Astro.params.locale) ? Astro.params.locale[0] : Astro.params.locale
+);
+
+const COPY: Record<AppLocale, { title: string; kicker: string; lede: string; links: string }> = {
+  de: {
+    title: "Seite nicht gefunden",
+    kicker: "Fehler 404",
+    lede: "Diese Meldung ist nicht mehr öffentlich, wurde mit einer anderen zusammengeführt, oder die Adresse stimmt nicht.",
+    links: "Weiter zu"
+  },
+  fr: {
+    title: "Page introuvable",
+    kicker: "Erreur 404",
+    lede: "Ce signalement n'est plus public, a été fusionné avec un autre, ou l'adresse est incorrecte.",
+    links: "Continuer vers"
+  },
+  it: {
+    title: "Pagina non trovata",
+    kicker: "Errore 404",
+    lede: "Questa segnalazione non è più pubblica, è stata unita a un'altra, oppure l'indirizzo non è corretto.",
+    links: "Prosegui verso"
+  },
+  en: {
+    title: "Page not found",
+    kicker: "Error 404",
+    lede: "This report is no longer public, was merged into another one, or the address is wrong.",
+    links: "Continue to"
+  }
+};
+const copy = COPY[locale];
+const links = [
+  { href: pathFor({ kind: "home" }, locale), label: t(locale, "nav.radar") },
+  { href: pathFor({ kind: "places" }, locale), label: t(locale, "data.nav.places") },
+  { href: pathFor({ kind: "operators" }, locale), label: t(locale, "nav.operators") },
+  { href: HELP_GUIDE_PATH, label: t(locale, "nav.help") }
+];
+---
+
+<RadarLayout title={`${copy.title} | outage.ch`} robots="noindex" shell="content" locale={locale}>
+  <article class="mx-auto w-full max-w-4xl">
+    <PageHero kicker={copy.kicker} title={copy.title} lede={copy.lede} />
+    <nav aria-label={copy.links} class="mt-6">
+      <p class="text-muted-foreground text-sm">{copy.links}</p>
+      <ul class="mt-2 flex flex-wrap gap-2">
+        {links.map((link) => (
+          <li><a class="bg-muted hover:bg-accent inline-flex rounded-full px-4 py-2 text-sm font-medium" href={link.href}>{link.label}</a></li>
+        ))}
+      </ul>
+    </nav>
+  </article>
+</RadarLayout>

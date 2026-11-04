@@ -257,6 +257,10 @@ export const it: Catalog = {
       "4": {
         q: "outage.ch indica un orario preciso di ripristino?",
         a: "Solo se una fonte pubblica lo conferma. Gli orari di fine mancanti sono contrassegnati come aperti. Le stime non sono presentate come fatti."
+      },
+      "5": {
+        q: "outage.ch copre tutta la Svizzera?",
+        a: "Non ancora. Sono ben coperte le zone di BKW, Romande Energie, ewl Lucerna, SES, AIL e di altri gestori che pubblicano i guasti. Molti gestori, ad esempio a Zurigo, nella Svizzera centrale e orientale, non pubblicano segnalazioni utilizzabili. Lì l'assenza di segnalazioni su outage.ch non significa che non ci sia un guasto: fa fede la pagina del suo gestore di rete."
       }
     }
   },
@@ -687,6 +691,10 @@ export const en: Catalog = {
       "4": {
         q: "Does outage.ch give an exact restoration time?",
         a: "Only if a public source confirms it. Missing end times are marked as open. Estimates are not presented as facts."
+      },
+      "5": {
+        q: "Does outage.ch cover all of Switzerland?",
+        a: "Not yet. The areas of BKW, Romande Energie, ewl Lucerne, SES, AIL and other operators that publish their outages are well covered. Many operators, for example in Zurich, Central and Eastern Switzerland, do not publish machine-readable reports. There, no report on outage.ch does not mean there is no outage: your grid operator's page is authoritative."
       }
     }
   },
