@@ -15,6 +15,8 @@ import { resolveOperatorProfile } from "./operators";
 import { derivePublicPlaces, placesKey, type PublicPlace } from "./public-places";
 import { resolvePublicEventLocation } from "./public-detail";
 import { publicEventPath } from "./public-url";
+import { reverseGeocodeSwissMunicipality } from "./geo";
+import { cantonByCode, cantonByName } from "./swiss-cantons";
 import type { Env, OutageEvent, OutageFact, PublicFeedItem } from "./types";
 
 export const PROJECTION_VERSION = "projection/v1";
@@ -256,6 +258,49 @@ export function stableItemKey(itemJson: string): string {
   } catch {
     return itemJson;
   }
+}
+
+/**
+ * Fills outage_events.canton for published events that have a map pin but no
+ * canton in their location text or geo label (e.g. "Losone - Arcegno", "Someo").
+ * Uses the geo.admin municipality boundaries at the pin; bounded per call
+ * because every lookup is an external subrequest. A lookup that finds nothing
+ * stores "" so it is not retried on every run. Touched events get a fresh
+ * updated_at, so the next projection refresh picks them up.
+ */
+export async function backfillEventCantons(
+  env: Pick<Env, "DB">,
+  options: { limit?: number; lookup?: typeof reverseGeocodeSwissMunicipality } = {}
+): Promise<{ checked: number; filled: number; errors: string[] }> {
+  const limit = Math.max(0, Math.min(25, Math.floor(options.limit ?? 4)));
+  const result = { checked: 0, filled: 0, errors: [] as string[] };
+  if (limit === 0) return result;
+  const lookup = options.lookup ?? reverseGeocodeSwissMunicipality;
+  const rows = (await env.DB.prepare(
+    `SELECT p.event_id, p.latitude, p.longitude
+     FROM public_events p
+     INNER JOIN outage_events event ON event.id = p.event_id
+     WHERE p.canton IS NULL AND p.latitude IS NOT NULL AND p.longitude IS NOT NULL
+       AND event.canton IS NULL
+     ORDER BY p.event_id DESC
+     LIMIT ?`
+  ).bind(limit).all<{ event_id: number; latitude: number; longitude: number }>()).results;
+  const statements: D1PreparedStatement[] = [];
+  for (const row of rows) {
+    result.checked += 1;
+    try {
+      const found = await lookup(row.latitude, row.longitude);
+      const code = cantonByCode(found?.canton)?.code ?? cantonByName(found?.canton)?.code ?? "";
+      if (code) result.filled += 1;
+      statements.push(env.DB.prepare(
+        "UPDATE outage_events SET canton = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND canton IS NULL"
+      ).bind(code, row.event_id));
+    } catch (error) {
+      result.errors.push(`canton ${row.event_id}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  if (statements.length) await env.DB.batch(statements);
+  return result;
 }
 
 export interface ProjectionRefreshResult {

@@ -114,6 +114,12 @@ function inferStatus(text: string, config: AdapterConfig): CanonicalObservationS
     "keine eintraege vorhanden",
     "aktuell liegen keine störungsmeldungen vor",
     "aktuell liegen keine stoerungsmeldungen vor",
+    // EW Urnäsch and similar small utilities phrase the all-clear this way.
+    "zurzeit sind keine unterbrechungen geplant",
+    "zurzeit sind keine störungen bekannt",
+    "zurzeit sind keine stoerungen bekannt",
+    "derzeit sind keine störungen bekannt",
+    "derzeit sind keine stoerungen bekannt",
     ...(config.no_outage_terms ?? [])
   ];
   if (noOutageTerms.some((term) => normalized.includes(normalizeLocation(term)))) return "irrelevant";
@@ -745,6 +751,116 @@ async function parseSesHtml(
   return { observations, schemaMatched: true };
 }
 
+function parseSwissDateTimeStart(text: string): string | null {
+  const match = compact(text).match(/(\d{1,2})\.(\d{1,2})\.(\d{4})\D{0,16}?(\d{1,2})[:.](\d{2})/);
+  if (!match) return null;
+  return swissWallClockToIso(Number(match[3]), Number(match[2]), Number(match[1]), Number(match[4]), Number(match[5]));
+}
+
+function labelledField(block: string, label: string): string {
+  const match = block.match(new RegExp(`<strong>\\s*${label}\\s*:?\\s*</strong>\\s*:?([\\s\\S]*?)</p>`, "i"));
+  return compact(stripHtml(match?.[1] ?? ""));
+}
+
+/**
+ * TB Flawil "Betriebsinfo": Joomla blog items with Wann / Was / Warum /
+ * Betroffen fields. Only electricity interruptions become observations;
+ * district-heating works and voltage dips are skipped.
+ */
+async function parseTbFlawilHtml(
+  source: SourceRegistryEntry,
+  html: string,
+  observedAt: string
+): Promise<KnownAdapterPayload> {
+  if (!/com-content-category-blog__item/.test(html)) return { observations: [], schemaMatched: false };
+  const observedMs = Date.parse(observedAt);
+  const observations: SourceObservationInput[] = [];
+  for (const block of extractDivBlocks(html, "com-content-category-blog__item")) {
+    const heading = compact(stripHtml(block.match(/<h2\b[^>]*>([\s\S]*?)<\/h2>/i)?.[1] ?? ""));
+    const what = labelledField(block, "Was");
+    const when = labelledField(block, "Wann");
+    const affected = labelledField(block, "Betroffen");
+    const cause = labelledField(block, "Warum");
+    const headline = `${heading} ${what}`;
+    // Electricity only: TB Flawil also posts district heating, water and thurcom
+    // (internet/TV) interruptions on the same page.
+    if (!/\bstrom/i.test(headline)) continue;
+    if (/\b(fernw[äa]rme|wasser|gas|spannungseinbruch|thurcom|internet|tv|telefon|glasfaser|service-unterbruch)\b/i.test(headline)) continue;
+    const range = parseSwissDateTimeRange(when);
+    const startedAt = range.startedAt ?? parseSwissDateTimeStart(when);
+    const resolvedAt = range.resolvedAt;
+    const startMs = startedAt ? Date.parse(startedAt) : NaN;
+    const planned = /\bgeplant|\bunterhalt|\bstromunterbruch\b/i.test(headline) && !/\bstromausfall\b/i.test(headline);
+    const over = resolvedAt
+      ? Date.parse(resolvedAt) <= observedMs
+      : Number.isFinite(startMs) && observedMs - startMs > 24 * 60 * 60 * 1000;
+    const status: CanonicalObservationStatus = Number.isFinite(startMs) && startMs > observedMs
+      ? "planned"
+      : over ? "resolved" : planned ? "planned" : "unplanned";
+    const area = compact(heading.replace(/^(geplanter\s+)?(stromausfall|stromunterbruch|unterbruch)\s*/i, "")) || affected;
+    const title = status === "planned"
+      ? `Geplanter Stromunterbruch in Flawil${area ? ` (${area})` : ""}`
+      : status === "resolved"
+        ? `Behobener Stromausfall in Flawil${area ? ` (${area})` : ""}`
+        : `Stromausfall in Flawil${area ? ` (${area})` : ""}`;
+    const text = compact(`${title}. ${when ? `Wann: ${when}.` : ""} ${cause ? `Ursache: ${cause}.` : ""} ${affected ? `Betroffen: ${affected}.` : ""}`);
+    observations.push(await makeKnownObservation(source, {
+      status,
+      title,
+      text,
+      location: "Flawil",
+      observedAt,
+      startedAt,
+      resolvedAt,
+      raw: { adapter: "tb-flawil-betriebsinfo", heading, when, what, cause, affected }
+    }));
+  }
+  return { observations, schemaMatched: true };
+}
+
+function tableCell(block: string, label: string): string {
+  const match = block.match(new RegExp(`<th\\b[^>]*>\\s*${label}\\s*:?\\s*</th>\\s*<td\\b[^>]*>([\\s\\S]*?)</td>`, "i"));
+  return compact(stripHtml(match?.[1] ?? "")).replace(/\*+$/, "").trim();
+}
+
+/**
+ * AIL (Lugano) "Comunicati di servizio" on /privati.html: one <li> per
+ * announced interruption with Data inizio / Data fine / Comune / Zona /
+ * Settore. Only the electricity sector is kept (water and gas share the list).
+ */
+async function parseAilHtml(
+  source: SourceRegistryEntry,
+  html: string,
+  observedAt: string
+): Promise<KnownAdapterPayload> {
+  if (!/customer-service-list/.test(html) || !/Data inizio/i.test(html)) return { observations: [], schemaMatched: false };
+  const observedMs = Date.parse(observedAt);
+  const observations: SourceObservationInput[] = [];
+  for (const block of extractClassBlocks(html, "div", "collapse")) {
+    const sector = tableCell(block, "Settore");
+    if (!/elettric/i.test(sector)) continue;
+    const comune = tableCell(block, "Comune");
+    if (!comune) continue;
+    const startedAt = parseSwissDateTimeStart(tableCell(block, "Data inizio"));
+    const resolvedAt = parseSwissDateTimeStart(tableCell(block, "Data fine"));
+    if (!startedAt) continue;
+    const zona = tableCell(block, "Zona");
+    const status: CanonicalObservationStatus = resolvedAt && Date.parse(resolvedAt) <= observedMs ? "resolved" : "planned";
+    const title = `Interruzione di corrente pianificata a ${comune}`;
+    observations.push(await makeKnownObservation(source, {
+      status,
+      title,
+      text: compact(`${title}. ${zona ? `Zona: ${zona}.` : ""}`),
+      location: comune,
+      observedAt,
+      startedAt,
+      resolvedAt,
+      raw: { adapter: "ail-comunicati", comune, zona: zona.slice(0, 500), sector }
+    }));
+  }
+  return { observations, schemaMatched: true };
+}
+
 async function parseRepowerPayload(
   source: SourceRegistryEntry,
   payload: unknown,
@@ -1016,7 +1132,9 @@ export async function fetchSourceObservations(
     const htmlAdapters: Record<string, (source: SourceRegistryEntry, html: string, observedAt: string) => Promise<KnownAdapterPayload>> = {
       "ewz-stoerungen": parseEwzHtml,
       "ewl-luzern-stoerungen": parseEwlHtml,
-      "ses-homepage": parseSesHtml
+      "ses-homepage": parseSesHtml,
+      "tb-flawil-betriebsinfo": parseTbFlawilHtml,
+      "ail-homepage": parseAilHtml
     };
     const htmlAdapter = htmlAdapters[source.source_key];
     if (htmlAdapter && !fetched.error) {

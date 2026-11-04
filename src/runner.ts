@@ -54,13 +54,15 @@ import { canAutoMergeLocation, canCreateEvent, makeEventTitle, normalizeLocation
 import { normalizeSwissLocation } from "./geo";
 import { decideNewEventMail, decideUpdateMail } from "./intelligence";
 import { evaluatePublicEvent } from "./publication";
-import { refreshPublicProjection } from "./public-projection";
+import { backfillEventCantons, refreshPublicProjection } from "./public-projection";
 import { refreshPublicAggregates } from "./public-stats";
 
 /** Bounded per cron run so a backlog never blows the 10 ms CPU / subrequest budget. */
 const PROJECTION_LIMIT_PER_RUN = 60;
 /** External geo.admin lookups per run for events that still lack a map pin. */
 const LOCATION_LOOKUPS_PER_RUN = 3;
+/** External geo.admin boundary lookups per run for pinned events without a canton. */
+const CANTON_LOOKUPS_PER_RUN = 4;
 import { sendEventEmail } from "./email";
 import { cheapFilterItem } from "./filter";
 import { itemHash, parseRssFeed } from "./rss";
@@ -1096,6 +1098,8 @@ export async function runAlertCheck(env: Env): Promise<WorkflowRunSummary> {
 
     // Publish the run's outcome: one writer for every public page and statistic.
     try {
+      const cantons = await backfillEventCantons(env, { limit: CANTON_LOOKUPS_PER_RUN });
+      summary.errors.push(...cantons.errors);
       const projection = await refreshPublicProjection(env, {
         limit: PROJECTION_LIMIT_PER_RUN,
         resolveLocations: LOCATION_LOOKUPS_PER_RUN,
