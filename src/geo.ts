@@ -87,9 +87,16 @@ function pickCurrentMunicipality(results: GeoAdminResult[]): SwissMunicipalityFi
   return { municipality, canton: compactName(selected?.kanton) };
 }
 
+/**
+ * Municipality and canton at a WGS84 point. Returns null when the point lies in
+ * no Swiss municipality. With throwOnError, transport failures (timeouts,
+ * exhausted subrequest budget, HTTP errors) throw instead of looking like
+ * "nothing found", so callers do not persist a miss for a temporary failure.
+ */
 export async function reverseGeocodeSwissMunicipality(
   latitude: number,
-  longitude: number
+  longitude: number,
+  options: { throwOnError?: boolean } = {}
 ): Promise<SwissMunicipalityFix | null> {
   if (!isSwissWgs84(latitude, longitude)) return null;
 
@@ -111,10 +118,14 @@ export async function reverseGeocodeSwissMunicipality(
       headers: { "User-Agent": "swiss-power-outage-radar/0.1" },
       signal: controller.signal
     });
-    if (!response.ok) return null;
+    if (!response.ok) {
+      if (options.throwOnError) throw new Error(`geo.admin identify HTTP ${response.status}`);
+      return null;
+    }
     const data = (await response.json()) as GeoAdminResponse;
     return pickCurrentMunicipality(data.results ?? []);
-  } catch {
+  } catch (error) {
+    if (options.throwOnError) throw error;
     return null;
   } finally {
     clearTimeout(timeoutId);
