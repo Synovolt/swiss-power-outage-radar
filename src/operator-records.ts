@@ -451,6 +451,11 @@ export function recordsFromObservations(observations: SourceObservationInput[]):
     const start = isoOrNull(observation.startedAt);
     const end = isoOrNull(observation.resolvedAt);
     const identityText = start ? keyText(place) : keyText(observation.title.replace(/^(?:behoben\w*|beendet\w*)\s+/i, ""));
+    const raw = observation.rawPayloadJson ? safeJson(observation.rawPayloadJson) : null;
+    // Adapters that know the street or building pass it as raw.detail (ewl).
+    const detail = raw && typeof raw === "object" && typeof (raw as { detail?: unknown }).detail === "string"
+      ? textOrNull((raw as { detail: string }).detail)
+      : null;
     out.push({
       baseKey: `item:${identityText}:${start ?? "open"}`,
       stableIdentity: Boolean(start),
@@ -462,7 +467,7 @@ export function recordsFromObservations(observations: SourceObservationInput[]):
           : "active",
       title: observation.title || null,
       placeText: place,
-      detailText: null,
+      detailText: detail,
       latitude: null,
       longitude: null,
       reportedStartAt: start,
@@ -470,7 +475,7 @@ export function recordsFromObservations(observations: SourceObservationInput[]):
       endIsActual: status === "resolved" && Boolean(end),
       cause: null,
       customersAffected: null,
-      raw: observation.rawPayloadJson ? safeJson(observation.rawPayloadJson) : null
+      raw
     });
   }
   return dedupeByBaseKey(out);

@@ -694,6 +694,8 @@ async function parseEwlHtml(
     const titles = [...block.matchAll(/class="[^"]*disturbances__title[^"]*"[^>]*>([\s\S]*?)<\/p>/gi)]
       .map((match) => compact(stripHtml(match[1] ?? "")));
     const place = titles[0];
+    // The line under the place names the street or building ("Fluhmattstrasse 1").
+    const detail = compact(stripHtml(block.match(/disturbances__title[^"]*"[^>]*>[\s\S]*?<\/p>\s*<p class="subtitle">([\s\S]*?)<\/p>/i)?.[1] ?? "")) || null;
     const when = titles[1] ?? "";
     const utility = titles[2] ?? "";
     if (!place || isNonElectricUtility(utility || compact(stripHtml(block)))) continue;
@@ -717,7 +719,7 @@ async function parseEwlHtml(
       startedAt: range.startedAt,
       // For announced works the range end is the planned end (records keep it as reported_end_at).
       resolvedAt: resolved || planned ? range.resolvedAt : null,
-      raw: { adapter: "ewl-disturbances", excerpt: rowText.slice(0, 2000) }
+      raw: { adapter: "ewl-disturbances", excerpt: rowText.slice(0, 2000), detail }
     }));
   }
   return { observations, schemaMatched: true };
