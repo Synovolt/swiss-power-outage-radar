@@ -1,6 +1,10 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "swiss-power-outage-radar",
+  // Worker, D1 and R2 live in this account. Pinned because logins and API tokens
+  // that see more than one account otherwise stop with
+  // "More than one account available" in non-interactive deploys.
+  "account_id": "bd37f4f688e8e9dba73cd6600aa00a70",
   "main": "src/index.ts",
   "compatibility_date": "2026-07-30",
   "workers_dev": true,

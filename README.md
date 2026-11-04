@@ -262,6 +262,12 @@ npm run db:migrate:remote
 npm run deploy
 ```
 
+Das Cloudflare-Konto ist in `wrangler.jsonc` (`account_id`) fest eingetragen. Ohne diesen Eintrag brechen Deploys ab, sobald Login oder API-Token mehr als ein Konto sehen. Wrangler 4.118 liest den Eintrag bei `d1 migrations` noch nicht; Remote-Migrationen dann mit gesetzter Umgebungsvariable ausführen:
+
+```bash
+CLOUDFLARE_ACCOUNT_ID=<account_id aus wrangler.jsonc> npm run db:migrate:remote
+```
+
 Nach einem Deploy, der die Projektion einführt oder ihre Logik ändert, diese sofort vollständig neu aufbauen. Der Aufruf ist paginiert: mit dem zurückgegebenen `projection.nextBeforeId` als `before_id` wiederholen, bis er `null` ist. Bis dahin liefern Detailseite und `/api/public/events` über einen Fallback weiterhin Daten.
 
 ```bash
