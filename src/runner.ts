@@ -54,6 +54,13 @@ import { canAutoMergeLocation, canCreateEvent, makeEventTitle, normalizeLocation
 import { normalizeSwissLocation } from "./geo";
 import { decideNewEventMail, decideUpdateMail } from "./intelligence";
 import { evaluatePublicEvent } from "./publication";
+import { refreshPublicProjection } from "./public-projection";
+import { refreshPublicAggregates } from "./public-stats";
+
+/** Bounded per cron run so a backlog never blows the 10 ms CPU / subrequest budget. */
+const PROJECTION_LIMIT_PER_RUN = 400;
+/** External geo.admin lookups per run for events that still lack a map pin. */
+const LOCATION_LOOKUPS_PER_RUN = 3;
 import { sendEventEmail } from "./email";
 import { cheapFilterItem } from "./filter";
 import { itemHash, parseRssFeed } from "./rss";
@@ -1085,6 +1092,19 @@ export async function runAlertCheck(env: Env): Promise<WorkflowRunSummary> {
     summary.emailsSent += eventRetry.emailsSent;
     for (const error of eventRetry.errors) {
       console.warn(`pending email retry failed: ${error}`);
+    }
+
+    // Publish the run's outcome: one writer for every public page and statistic.
+    try {
+      const projection = await refreshPublicProjection(env, {
+        limit: PROJECTION_LIMIT_PER_RUN,
+        resolveLocations: LOCATION_LOOKUPS_PER_RUN,
+        sweepOrphans: new Date().getUTCMinutes() < 15
+      });
+      summary.errors.push(...projection.errors);
+      await refreshPublicAggregates(env, { projectionChanged: projection.written + projection.removed > 0 });
+    } catch (error) {
+      summary.errors.push(`public projection: ${error instanceof Error ? error.message : String(error)}`);
     }
 
     const calculatedAt = new Date().toISOString();

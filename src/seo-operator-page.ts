@@ -1,5 +1,7 @@
 import type { Env, PublicFeedItem } from "./types";
-import { getPublicFeedItemsByOperator } from "./db";
+import { escapeHtml, setMetaContent } from "./html";
+import { listPublicItems, readStatsCache } from "./public-projection";
+import { OPERATOR_STATS_CACHE_KEY } from "./public-stats";
 import {
   ELCOM_PRICE_URL,
   elcomDatasetJsonLd,
@@ -36,14 +38,6 @@ import {
   type AppLocale
 } from "./i18n";
 
-function escapeHtml(value: unknown): string {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
 function formatDate(value: string | null | undefined, locale: AppLocale = "de"): string | null {
   return formatAppDate(value, locale, { dateStyle: "medium", timeStyle: "short" });
 }
@@ -66,11 +60,18 @@ export async function loadOperatorLive(
   profile: OperatorProfile,
   input: { excludeId?: number; limit?: number } = {}
 ): Promise<OperatorLiveContext> {
-  const items = await getPublicFeedItemsByOperator(db, profile, input.limit ?? 40);
+  // Statistics cover the operator's complete public record (precomputed by the
+  // cron), the list only the most recent reports.
+  const [cached, recent] = await Promise.all([
+    readStatsCache<Record<string, OperatorLiveStats>>(db, OPERATOR_STATS_CACHE_KEY),
+    listPublicItems(db, { operatorSlug: profile.slug, limit: (input.limit ?? 12) + 1, excludeId: input.excludeId })
+  ]);
+  const stats = cached?.payload[profile.slug]
+    ?? summarizeOperatorEvents(await listPublicItems(db, { operatorSlug: profile.slug, limit: 2000 }));
   return {
     profile,
-    stats: summarizeOperatorEvents(items),
-    recent: items.filter((item) => item.id !== input.excludeId).slice(0, 12)
+    stats,
+    recent: recent.slice(0, input.limit ?? 12)
   };
 }
 
@@ -273,9 +274,23 @@ export function operatorPageJsonLd(
 
 export function groupPublicItemsByOperator(items: PublicFeedItem[]): Map<string, PublicFeedItem[]> {
   const grouped = new Map<string, PublicFeedItem[]>();
-  for (const operator of publicOperatorProfiles()) {
-    const matched = items.filter((item) => eventMatchesOperator(item, operator));
-    if (matched.length) grouped.set(operator.slug, matched);
+  const known = new Set(publicOperatorProfiles().map((operator) => operator.slug));
+  const unresolved: PublicFeedItem[] = [];
+  for (const item of items) {
+    // Projected items carry their operator; only legacy items still need matching.
+    if (item.operator_slug !== undefined) {
+      if (item.operator_slug && known.has(item.operator_slug)) {
+        grouped.set(item.operator_slug, [...(grouped.get(item.operator_slug) ?? []), item]);
+      }
+      continue;
+    }
+    unresolved.push(item);
+  }
+  if (unresolved.length) {
+    for (const operator of publicOperatorProfiles()) {
+      const matched = unresolved.filter((item) => eventMatchesOperator(item, operator));
+      if (matched.length) grouped.set(operator.slug, [...(grouped.get(operator.slug) ?? []), ...matched]);
+    }
   }
   return grouped;
 }
@@ -292,9 +307,7 @@ export function renderOperatorHubLive(
     return left.name.localeCompare(right.name, DATE_LOCALE[locale]);
   });
   const withEvents = operators.filter((operator) => (grouped.get(operator.slug)?.length ?? 0) > 0).length;
-  const total = items.filter((item) =>
-    publicOperatorProfiles().some((operator) => eventMatchesOperator(item, operator))
-  ).length;
+  const total = [...grouped.values()].reduce((sum, matched) => sum + matched.length, 0);
   const summary = total
     ? t(locale, "operator.hubSummary", { total, withEvents })
     : t(locale, "operator.hubSummaryEmpty");
@@ -315,14 +328,6 @@ export function renderOperatorHubLive(
     );
   }).join("");
   return { summary, list };
-}
-
-function setMetaContent(content: string) {
-  return {
-    element(element: Element) {
-      element.setAttribute("content", content);
-    }
-  };
 }
 
 export async function renderSeoOperatorAsset(

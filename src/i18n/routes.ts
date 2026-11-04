@@ -10,6 +10,7 @@ import {
   localeFromParam,
   localePrefix
 } from "./locales";
+import { cantonBySlug, cantonSlug } from "../swiss-cantons";
 
 export const HELP_GUIDE_PATH = "/ratgeber/stromausfall-was-tun/";
 
@@ -21,9 +22,31 @@ export type AppRoute =
   | { kind: "guides" }
   | { kind: "guide"; slug: string }
   | { kind: "event"; slugId: string }
-  | { kind: "eventsTemplate" };
+  | { kind: "eventsTemplate" }
+  | { kind: "stats" }
+  | { kind: "places" }
+  | { kind: "place"; slug: string }
+  | { kind: "canton"; slug: string }
+  | { kind: "dataTemplate" };
 
 const EVENT_STEM_PATTERN = EVENT_STEMS.join("|");
+
+export const STATS_STEM: Record<AppLocale, string> = {
+  de: "statistik",
+  fr: "statistiques",
+  it: "statistiche",
+  en: "statistics"
+};
+
+export const CANTON_STEM: Record<AppLocale, string> = {
+  de: "kanton",
+  fr: "canton",
+  it: "cantone",
+  en: "canton"
+};
+
+const STATS_STEM_PATTERN = [...new Set(Object.values(STATS_STEM))].join("|");
+const CANTON_STEM_PATTERN = [...new Set(Object.values(CANTON_STEM))].join("|");
 
 export function parseLocaleFromPath(pathname: string): AppLocale {
   const match = pathname.match(/^\/(fr|it|en)(?:\/|$)/);
@@ -70,7 +93,24 @@ export function pathFor(route: AppRoute, locale: AppLocale = "de"): string {
       return `${prefix}/${EVENT_STEM[locale]}/${route.slugId}`;
     case "eventsTemplate":
       return `${prefix}/events/`;
+    case "stats":
+      return `${prefix}/${STATS_STEM[locale]}/`;
+    case "places":
+      return `${prefix}/${EVENT_STEM[locale]}/`;
+    case "place":
+      return `${prefix}/${EVENT_STEM[locale]}/${route.slug}`;
+    case "canton":
+      return `${prefix}/${EVENT_STEM[locale]}/${CANTON_STEM[locale]}/${route.slug}`;
+    case "dataTemplate":
+      return `${prefix}/data-template/`;
   }
+}
+
+/** Static shells that only exist to be filled by the Worker; never served directly. */
+export function templateShellTarget(pathname: string): string | null {
+  const shell = pathname.match(/^(?:\/(fr|it|en))?\/(?:events|data-template)\/?$/);
+  if (!shell) return null;
+  return shell[1] ? `/${shell[1]}/` : "/";
 }
 
 export function parseAppPath(pathname: string): { locale: AppLocale; route: AppRoute } | null {
@@ -90,8 +130,19 @@ export function parseAppPath(pathname: string): { locale: AppLocale; route: AppR
   const guide = path.match(/^\/ratgeber\/([a-z0-9-]+)$/);
   if (guide) return { locale, route: { kind: "guide", slug: guide[1] } };
 
+  if (path === "/data-template") return { locale, route: { kind: "dataTemplate" } };
+
   const event = path.match(new RegExp(`^/(?:${EVENT_STEM_PATTERN})/([a-z0-9-]+-\\d+)$`));
   if (event) return { locale, route: { kind: "event", slugId: event[1] } };
+
+  if (new RegExp(`^/(?:${STATS_STEM_PATTERN})$`).test(path)) return { locale, route: { kind: "stats" } };
+  if (new RegExp(`^/(?:${EVENT_STEM_PATTERN})$`).test(path)) return { locale, route: { kind: "places" } };
+
+  const canton = path.match(new RegExp(`^/(?:${EVENT_STEM_PATTERN})/(?:${CANTON_STEM_PATTERN})/([a-z0-9-]+)$`));
+  if (canton) return { locale, route: { kind: "canton", slug: canton[1] } };
+
+  const place = path.match(new RegExp(`^/(?:${EVENT_STEM_PATTERN})/([a-z0-9-]*[a-z][a-z0-9-]*)$`));
+  if (place && !/-\d+$/.test(place[1])) return { locale, route: { kind: "place", slug: place[1] } };
 
   return null;
 }
@@ -124,18 +175,32 @@ export function eventCanonicalRedirect(pathname: string, storedUrl: string): str
   return pathname === expected ? null : expected;
 }
 
+/** Routes whose slug itself is localized (canton names) are translated here. */
+export function localizeRoute(route: AppRoute, locale: AppLocale): AppRoute {
+  if (route.kind !== "canton") return route;
+  const canton = cantonBySlug(route.slug);
+  return canton ? { kind: "canton", slug: cantonSlug(canton, locale) } : route;
+}
+
 export function alternatePath(pathname: string, target: AppLocale): string {
   const parsed = parseAppPath(pathname);
   if (!parsed) return pathFor({ kind: "home" }, target);
   if (parsed.route.kind === "guide") {
     return target === "de" ? pathFor(parsed.route, "de") : pathFor({ kind: "guides" }, target);
   }
-  return pathFor(parsed.route, target);
+  return pathFor(localizeRoute(parsed.route, target), target);
+}
+
+/** Canonical path for a parsed public route, or null when the route is not a page. */
+export function canonicalRoutePath(pathname: string): string | null {
+  const parsed = parseAppPath(pathname);
+  if (!parsed) return null;
+  return pathFor(localizeRoute(parsed.route, parsed.locale), parsed.locale);
 }
 
 export function hreflangEntries(pathname: string, origin: string): Array<{ locale: AppLocale | "x-default"; href: string; hreflang: string }> {
   const parsed = parseAppPath(pathname);
-  if (!parsed || parsed.route.kind === "eventsTemplate") return [];
+  if (!parsed || parsed.route.kind === "eventsTemplate" || parsed.route.kind === "dataTemplate") return [];
   const route = parsed.route;
   const locales: AppLocale[] = route.kind === "guide" ? ["de"] : [...APP_LOCALES];
   const seen = new Set<string>();
@@ -144,9 +209,9 @@ export function hreflangEntries(pathname: string, origin: string): Array<{ local
     const hreflang = HREFLANG[locale];
     if (seen.has(hreflang)) continue;
     seen.add(hreflang);
-    entries.push({ locale, href: `${origin}${pathFor(route, locale)}`, hreflang });
+    entries.push({ locale, href: `${origin}${pathFor(localizeRoute(route, locale), locale)}`, hreflang });
   }
-  const defaultHref = `${origin}${pathFor(route, "de")}`;
+  const defaultHref = `${origin}${pathFor(localizeRoute(route, "de"), "de")}`;
   if (!seen.has("x-default")) {
     entries.push({ locale: "x-default", href: defaultHref, hreflang: "x-default" });
   }

@@ -31,7 +31,6 @@ import type {
 import { canonicalSourceUrl, classifySource } from "./intelligence";
 import { attachPublicMapCoords, parsePublicFeedCursor, publicFeedCursor, toPublicFeedItem } from "./publication";
 import type { HistoricalBackfillTarget } from "./historical-backfill";
-import { operatorHostnames, type OperatorProfile } from "./operators";
 
 function changes(result: D1Result<unknown>): number {
   const meta = result.meta as { changes?: number } | undefined;
@@ -994,24 +993,33 @@ export async function reconcileSourcePresence(
      WHERE source_registry_id = ? ${exclusion}`
   ).bind(checkedAt, sourceRegistryId, ...presentEventIds).run();
 
+  // The end of an auto-closed outage is bracketed by the polling cadence: it was
+  // still listed at the last confirmation and gone at the first missing check.
+  // Keeping that window (instead of NULL) is what makes duration statistics possible.
   await db.prepare(
     `UPDATE outage_events
      SET status = 'resolved',
-         resolution_earliest_at = NULL,
-         resolution_latest_at = NULL,
+         resolution_earliest_at = (
+           SELECT MAX(p.last_confirmed_at) FROM outage_event_source_presence p
+           WHERE p.outage_event_id = outage_events.id
+         ),
+         resolution_latest_at = (
+           SELECT MAX(p.first_missing_at) FROM outage_event_source_presence p
+           WHERE p.outage_event_id = outage_events.id
+         ),
          time_confidence = 'inferred',
          updated_at = CURRENT_TIMESTAMP
      WHERE status NOT IN ('dismissed', 'resolved')
-       AND EXISTS (
-         SELECT 1 FROM outage_event_source_presence p
-         WHERE p.outage_event_id = outage_events.id
+       AND id IN (
+         SELECT outage_event_id FROM outage_event_source_presence
+         WHERE source_registry_id = ?
        )
        AND NOT EXISTS (
          SELECT 1 FROM outage_event_source_presence p
          WHERE p.outage_event_id = outage_events.id
            AND p.consecutive_missing_checks < 2
        )`
-  ).run();
+  ).bind(sourceRegistryId).run();
 }
 
 export async function markOutageEventEmailSent(
@@ -2047,105 +2055,6 @@ export async function getUnplannedEventsDueForResearchRefresh(
      LIMIT ?`
   ).bind(activeWindowStart, staleBefore, dayBefore, Math.max(1, Math.min(2, limit))).all<OutageEvent>();
   return result.results;
-}
-
-export async function getRelatedPublicFeedItems(
-  db: D1Database,
-  input: { excludeId: number; limit?: number }
-): Promise<PublicFeedItem[]> {
-  const limit = Math.max(1, Math.min(12, Math.floor(input.limit ?? 6)));
-  const { items } = await getPublicFeedItems(db, { limit: Math.min(25, limit + 5) });
-  return items.filter((item) => item.id !== input.excludeId).slice(0, limit);
-}
-
-type PublicDecisionRow = OutageEvent & {
-  publication_trust: "official" | "corroborated" | "reported";
-  publication_summary: string;
-  primary_source_publisher: string;
-  primary_source_url: string;
-  primary_source_domain: string;
-};
-
-function toLitePublicFeedItem(row: PublicDecisionRow): PublicFeedItem | null {
-  return toPublicFeedItem(row, {
-    publishable: true,
-    trust: row.publication_trust,
-    reasons: [],
-    summary: row.publication_summary,
-    primary_source: {
-      publisher: row.primary_source_publisher,
-      url: row.primary_source_url,
-      domain: row.primary_source_domain
-    }
-  }, []);
-}
-
-const PUBLIC_OPERATOR_FEED_SQL = `SELECT event.*, decision.trust AS publication_trust,
-        decision.public_summary AS publication_summary,
-        decision.primary_source_publisher, decision.primary_source_url,
-        decision.primary_source_domain
- FROM outage_events event
- INNER JOIN publication_decisions decision ON decision.outage_event_id = event.id
- WHERE decision.publishable = 1
-   AND event.status != 'dismissed'
-   AND event.country = 'CH'`;
-
-export async function listPublishedPublicFeedLite(
-  db: D1Database,
-  limit = 500
-): Promise<PublicFeedItem[]> {
-  const capped = Math.max(1, Math.min(2000, Math.floor(Number.isFinite(limit) ? limit : 500)));
-  const result = await db
-    .prepare(
-      `${PUBLIC_OPERATOR_FEED_SQL}
-       ORDER BY event.updated_at DESC, event.id DESC
-       LIMIT ?`
-    )
-    .bind(capped)
-    .all<PublicDecisionRow>();
-  return result.results.flatMap((row) => {
-    const item = toLitePublicFeedItem(row);
-    return item ? [item] : [];
-  });
-}
-
-function operatorMatchClause(operator: OperatorProfile): { sql: string; binds: string[] } {
-  const clauses: string[] = [];
-  const binds: string[] = [];
-  for (const host of operatorHostnames(operator)) {
-    clauses.push("REPLACE(LOWER(decision.primary_source_domain), 'www.', '') = ?");
-    binds.push(host);
-    clauses.push("REPLACE(LOWER(decision.primary_source_domain), 'www.', '') LIKE ?");
-    binds.push(`%.${host}`);
-  }
-  clauses.push("LOWER(TRIM(decision.primary_source_publisher)) = ?");
-  binds.push(operator.name.toLowerCase());
-  return {
-    sql: clauses.length ? `(${clauses.join(" OR ")})` : "0",
-    binds
-  };
-}
-
-export async function getPublicFeedItemsByOperator(
-  db: D1Database,
-  operator: OperatorProfile,
-  limit = 40
-): Promise<PublicFeedItem[]> {
-  const capped = Math.max(1, Math.min(80, Math.floor(Number.isFinite(limit) ? limit : 40)));
-  const match = operatorMatchClause(operator);
-  const result = await db
-    .prepare(
-      `${PUBLIC_OPERATOR_FEED_SQL}
-         AND ${match.sql}
-       ORDER BY event.updated_at DESC, event.id DESC
-       LIMIT ?`
-    )
-    .bind(...match.binds, capped)
-    .all<PublicDecisionRow>();
-  return result.results.flatMap((row) => {
-    const item = toLitePublicFeedItem(row);
-    return item ? [item] : [];
-  });
 }
 
 export async function createGeoSyncRun(

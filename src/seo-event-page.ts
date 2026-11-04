@@ -9,7 +9,9 @@ import {
   publicDisplayLocation
 } from "./public-url";
 import { renderOperatorStatsGrid } from "./seo-operator-page";
-import { localizedHomeFaqs, organizationId, siteDescription, websiteId } from "./seo-site";
+import { organizationId, websiteId } from "./seo-site";
+import { escapeHtml, setMetaContent } from "./html";
+import { cantonByCode, cantonInText, cantonSlug } from "./swiss-cantons";
 import {
   DATE_LOCALE,
   HTML_LANG,
@@ -42,11 +44,6 @@ export function eventHreflangLinkTags(storedUrl: string, origin = SITE_ORIGIN): 
   return Object.entries(eventHreflangHrefMap(storedUrl, origin))
     .map(([hreflang, href]) => `<link rel="alternate" hreflang="${escapeHtml(hreflang)}" href="${escapeHtml(href)}">`)
     .join("");
-}
-
-function escapeHtml(value: unknown): string {
-  return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 function formatDate(value: string | null | undefined, locale: AppLocale = "de"): string | null {
@@ -288,15 +285,16 @@ export function eventSeo(detail: PublicEventDetail, origin = SITE_ORIGIN, locale
     },
     {
       "@type": "BreadcrumbList", "@id": `${canonical}#breadcrumb`,
+      // Place hierarchy (canton → municipality) matches how people search
+      // ("stromausfall brugg"); falls back to the operator when no place is known.
       itemListElement: [
-        { "@type": "ListItem", position: 1, name: t(locale, "site.breadcrumbHome"), item: homeUrl },
-        ...(operatorPage && operatorProfile
-          ? [
-              { "@type": "ListItem", position: 2, name: operatorProfile.name, item: operatorPage },
-              { "@type": "ListItem", position: 3, name: location, item: canonical }
-            ]
-          : [{ "@type": "ListItem", position: 2, name: location, item: canonical }])
-      ]
+        { "@type": "ListItem", name: t(locale, "site.breadcrumbHome"), item: homeUrl },
+        ...placeTrail(detail, locale, siteOrigin),
+        ...(!placeTrail(detail, locale, siteOrigin).length && operatorPage && operatorProfile
+          ? [{ "@type": "ListItem", name: operatorProfile.name, item: operatorPage }]
+          : []),
+        { "@type": "ListItem", name: location, item: canonical }
+      ].map((entry, index) => ({ ...entry, position: index + 1 }))
     }
   ];
   const faqId = `${canonical}#faq`;
@@ -469,6 +467,29 @@ function renderOperator(operator: PublicEventDetail["operator"], locale: AppLoca
   </aside>`;
 }
 
+/** Canton and primary place pages for this event (empty when unknown). */
+function placeTrail(detail: PublicEventDetail, locale: AppLocale, origin = SITE_ORIGIN): Array<{ "@type": "ListItem"; name: string; item: string }> {
+  const trail: Array<{ "@type": "ListItem"; name: string; item: string }> = [];
+  const canton = cantonByCode(detail.item.canton);
+  if (canton) {
+    trail.push({ "@type": "ListItem", name: canton.names[locale], item: `${origin}${pathFor({ kind: "canton", slug: cantonSlug(canton, locale) }, locale)}` });
+  }
+  const place = detail.item.places?.[0];
+  if (place) trail.push({ "@type": "ListItem", name: place.name, item: `${origin}${pathFor({ kind: "place", slug: place.slug }, locale)}` });
+  return trail;
+}
+
+function renderPlaceLinks(detail: PublicEventDetail, locale: AppLocale): string {
+  const places = detail.item.places ?? [];
+  const canton = cantonByCode(detail.item.canton);
+  if (!places.length && !canton) return "";
+  const links = [
+    ...places.slice(0, 6).map((place) => `<a href="${escapeHtml(pathFor({ kind: "place", slug: place.slug }, locale))}">${escapeHtml(t(locale, "data.place.h1", { place: place.name }))}</a>`),
+    ...(canton ? [`<a href="${escapeHtml(pathFor({ kind: "canton", slug: cantonSlug(canton, locale) }, locale))}">${escapeHtml(t(locale, "data.canton.h1", { canton: cantonInText(canton, locale) }))}</a>`] : [])
+  ];
+  return `<nav class="brief__places" aria-label="${escapeHtml(t(locale, "data.nav.places"))}">${links.join("")}</nav>`;
+}
+
 function renderTimeline(detail: PublicEventDetail, locale: AppLocale): string {
   if (!detail.timeline.length) return "";
   return `<ol class="brief__times">${detail.timeline.map((entry) =>
@@ -513,6 +534,7 @@ export function renderEventSeoMarkup(
         <section class="fact-strip"><h2>${escapeHtml(t(locale, "event.factsHeading"))}</h2><dl>${factRows.map(([label, value]) =>
           `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl></section>
         ${renderTimeline(detail, locale)}
+        ${renderPlaceLinks(detail, locale)}
         ${renderOperator(detail.operator, locale, live)}
       </div>
       <div class="brief__map event-hero ${hasMap ? "has-map map-loading" : "no-map"}">${hasMap ? `<div id="event-map" role="img" aria-label="${escapeHtml(t(locale, "event.mapAria", { label: detail.map!.label }))}"></div><div class="map-fallback" aria-hidden="true"><span></span><strong>${escapeHtml(detail.map!.label)}</strong><small>${escapeHtml(t(locale, "event.mapLoading"))}</small></div>` : ""}<div class="hero-wash"></div>${hasMap ? `<span class="map-place">${escapeHtml(detail.map!.label)}</span>` : ""}</div>
@@ -526,14 +548,6 @@ export function renderEventSeoMarkup(
     </div>
     <footer class="detail-note">${escapeHtml(t(locale, "event.footer", { date: formatDate(item.updated_at, locale) }))}</footer>
   </article>`;
-}
-
-function setMetaContent(content: string) {
-  return {
-    element(element: Element) {
-      element.setAttribute("content", content);
-    }
-  };
 }
 
 export async function renderSeoEventAsset(
@@ -574,57 +588,4 @@ export async function renderSeoEventAsset(
     } })
     .on("#event-shell", { element(element) { element.setInnerContent(renderEventSeoMarkup(detail, related, live, locale), { html: true }); element.setAttribute("aria-busy", "false"); } })
     .transform(new Response(asset.body, { status: asset.status, headers: { ...Object.fromEntries(asset.headers), "Cache-Control": "public,max-age=60,s-maxage=300,stale-while-revalidate=1800" } }));
-}
-
-export function renderHomeFeedLinks(items: PublicFeedItem[], locale: AppLocale = "de"): string {
-  const eventLinks = items.length
-    ? `<ul>${items.map((item) => {
-      const location = publicDisplayLocation(item.location);
-      const kind = item.nature === "planned" ? t(locale, "nature.plannedKind") : t(locale, "nature.unplannedKind");
-      return `<li><a href="${escapeHtml(localizeStoredEventUrl(item.url, locale))}">${escapeHtml(t(locale, "event.in", { kind, location }))}</a></li>`;
-    }).join("")}</ul>`
-    : `<p>${escapeHtml(t(locale, "home.seoEmpty"))}</p>`;
-  const faq = localizedHomeFaqs(locale).map((item) => `<h3>${escapeHtml(item.question)}</h3><p>${escapeHtml(item.answer)}</p>`).join("");
-  return `<section class="seo-feed-index">
-    <h2>${escapeHtml(t(locale, "home.seoHeading"))}</h2>
-    <p>${escapeHtml(siteDescription(locale))}</p>
-    <h2>${escapeHtml(t(locale, "home.seoReports"))}</h2>
-    ${eventLinks}
-    <p>
-      <a href="${pathFor({ kind: "guides" }, locale)}">${escapeHtml(t(locale, "home.seoGuides"))}</a>
-      · <a href="${pathFor({ kind: "operators" }, locale)}">${escapeHtml(t(locale, "home.seoOperators"))}</a>
-      · <a href="${pathFor({ kind: "about" }, locale)}">${escapeHtml(t(locale, "home.seoAbout"))}</a>
-      · <a href="/ratgeber/stromausfall-was-tun/">${escapeHtml(t(locale, "home.seoHelp"))}</a>
-    </p>
-    <h2>${escapeHtml(t(locale, "home.seoFaq"))}</h2>
-    ${faq}
-  </section>`;
-}
-
-export async function renderHomeSeoAsset(
-  env: Pick<Env, "ASSETS">,
-  request: Request,
-  items: PublicFeedItem[]
-): Promise<Response> {
-  const locale = parseLocaleFromPath(new URL(request.url).pathname);
-  const homePath = pathFor({ kind: "home" }, locale);
-  const asset = await env.ASSETS.fetch(new Request(new URL(homePath, request.url), request));
-  const canonical = absoluteUrl(homePath, SITE_ORIGIN);
-  const ogImage = absoluteUrl(DEFAULT_OG_IMAGE_PATH, SITE_ORIGIN);
-  const feedLinks = renderHomeFeedLinks(items, locale);
-  return new HTMLRewriter()
-    .on('link[rel="canonical"]', { element(element) { element.setAttribute("href", canonical); } })
-    .on('meta[property="og:url"]', setMetaContent(canonical))
-    .on('meta[property="og:image"]', setMetaContent(ogImage))
-    .on('meta[name="twitter:image"]', setMetaContent(ogImage))
-    .on(".radar", { element(element) {
-      element.append(feedLinks, { html: true });
-    } })
-    .transform(new Response(asset.body, {
-      status: asset.status,
-      headers: {
-        ...Object.fromEntries(asset.headers),
-        "Cache-Control": "public,max-age=60,s-maxage=120,stale-while-revalidate=600"
-      }
-    }));
 }

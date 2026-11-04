@@ -18,7 +18,8 @@ import Bolt from "@tabler/icons/outline/bolt.svg";
 import RadarIcon from "@tabler/icons/outline/radar-2.svg";
 import Building from "@tabler/icons/outline/building.svg";
 import Book from "@tabler/icons/outline/book-2.svg";
-import Help from "@tabler/icons/outline/help-circle.svg";
+import ChartBar from "@tabler/icons/outline/chart-bar.svg";
+import MapPin from "@tabler/icons/outline/map-pin.svg";
 
 interface Props {
   title: string;
@@ -30,7 +31,7 @@ interface Props {
   robots?: string;
   /** radar = full-bleed map home; content = article/detail shell */
   shell?: "radar" | "content";
-  activeNav?: "radar" | "ratgeber" | "help" | "operators";
+  activeNav?: "radar" | "ratgeber" | "help" | "operators" | "stats" | "places";
   locale?: AppLocale;
 }
 
@@ -57,6 +58,8 @@ const alternates = indexable ? hreflangEntries(Astro.url.pathname, SITE_ORIGIN) 
 const homeHref = pathFor({ kind: "home" }, locale);
 const nav = [
   { href: homeHref, id: "radar" as const, label: t(locale, "nav.radar") },
+  { href: pathFor({ kind: "places" }, locale), id: "places" as const, label: t(locale, "data.nav.places") },
+  { href: pathFor({ kind: "stats" }, locale), id: "stats" as const, label: t(locale, "data.nav.stats") },
   { href: pathFor({ kind: "operators" }, locale), id: "operators" as const, label: t(locale, "nav.operators") },
   { href: pathFor({ kind: "guides" }, locale), id: "ratgeber" as const, label: t(locale, "nav.guides") },
   { href: HELP_GUIDE_PATH, id: "help" as const, label: t(locale, "nav.help") }
@@ -116,6 +119,7 @@ const nav = [
               <a
                 class="app-top__link"
                 href={item.href}
+                data-nav-id={item.id}
                 aria-current={activeNav === item.id ? "page" : undefined}
               >
                 {item.label}
@@ -132,6 +136,8 @@ const nav = [
           <nav class="app-footnav" aria-label={t(locale, "nav.morePages")}>
             <span class="app-footnav__brand">outage.ch</span>
             <a href={pathFor({ kind: "about" }, locale)}>{t(locale, "nav.about")}</a>
+            <a href={HELP_GUIDE_PATH}>{t(locale, "nav.help")}</a>
+            <a href={pathFor({ kind: "stats" }, locale)}>{t(locale, "data.nav.stats")}</a>
             <a href={pathFor({ kind: "operators" }, locale)}>{t(locale, "nav.operators")}</a>
             <a href={pathFor({ kind: "guides" }, locale)}>{t(locale, "nav.guides")}</a>
           </nav>
@@ -139,21 +145,25 @@ const nav = [
       </main>
 
       <nav class="app-dock" aria-label={t(locale, "nav.dock")}>
-        <a href={homeHref} aria-current={activeNav === "radar" ? "page" : undefined}>
+        <a href={homeHref} data-nav-id="radar" aria-current={activeNav === "radar" ? "page" : undefined}>
           <RadarIcon class="size-5" aria-hidden="true" />
           {t(locale, "nav.radar")}
         </a>
-        <a href={pathFor({ kind: "operators" }, locale)} aria-current={activeNav === "operators" ? "page" : undefined}>
+        <a href={pathFor({ kind: "places" }, locale)} data-nav-id="places" aria-current={activeNav === "places" ? "page" : undefined}>
+          <MapPin class="size-5" aria-hidden="true" />
+          {t(locale, "data.nav.places")}
+        </a>
+        <a href={pathFor({ kind: "stats" }, locale)} data-nav-id="stats" aria-current={activeNav === "stats" ? "page" : undefined}>
+          <ChartBar class="size-5" aria-hidden="true" />
+          {t(locale, "data.nav.stats")}
+        </a>
+        <a href={pathFor({ kind: "operators" }, locale)} data-nav-id="operators" aria-current={activeNav === "operators" ? "page" : undefined}>
           <Building class="size-5" aria-hidden="true" />
           {t(locale, "nav.operators")}
         </a>
-        <a href={pathFor({ kind: "guides" }, locale)} aria-current={activeNav === "ratgeber" ? "page" : undefined}>
+        <a href={pathFor({ kind: "guides" }, locale)} data-nav-id="ratgeber" aria-current={activeNav === "ratgeber" ? "page" : undefined}>
           <Book class="size-5" aria-hidden="true" />
           {t(locale, "nav.guides")}
-        </a>
-        <a href={HELP_GUIDE_PATH} aria-current={activeNav === "help" ? "page" : undefined}>
-          <Help class="size-5" aria-hidden="true" />
-          {t(locale, "nav.help")}
         </a>
       </nav>
     </div>

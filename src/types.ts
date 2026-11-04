@@ -287,6 +287,11 @@ export interface PublicFeedItem {
   latitude?: number | null;
   longitude?: number | null;
   map_precision?: "address" | "locality" | "municipality" | "district" | "region" | null;
+  /** Filled by the public projection: the operator profile behind the primary source. */
+  operator_slug?: string | null;
+  operator_name?: string | null;
+  /** Filled by the public projection: affected municipalities/localities (for place pages). */
+  places?: Array<{ slug: string; name: string }>;
 }
 
 export interface SourceSnapshot {

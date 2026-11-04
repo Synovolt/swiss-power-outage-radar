@@ -266,11 +266,20 @@ function publicNature(event: OutageEvent, facts: OutageFact[]): NonNullable<Outa
 }
 
 export const ACTIVE_EVENT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+/** A planned window counts as over once its announced end lies this far in the past without a newer confirmation. */
+export const PLANNED_WINDOW_GRACE_MS = 30 * 60 * 1000;
 
+/**
+ * Single source of truth for the public state of an event. Everything public
+ * (feed, detail, operator and place pages, statistics) must go through this
+ * function — via the materialized `public_events` projection — so that the same
+ * event never shows two different states on two pages.
+ */
 export function toPublicFeedItem(
   event: OutageEvent,
   decision: PublicationDecision,
-  facts: OutageFact[] = []
+  facts: OutageFact[] = [],
+  now: number = Date.now()
 ): PublicFeedItem | null {
   if (!decision.publishable || !decision.trust || !decision.primary_source || !decision.summary || !event.received_at) {
     return null;
@@ -278,9 +287,22 @@ export function toPublicFeedItem(
 
   const nature = publicNature(event, facts);
   const startedAt = isoOrNull(concreteFact(facts, "start_time") ?? event.started_at_estimate);
-  const resolvedAt = isoOrNull(concreteFact(facts, "end_time") ?? event.resolved_at_estimate);
-  const now = Date.now();
+  const expectedRestoreAt = isoOrNull(event.expected_restore_at);
+  const reportedResolvedAt = isoOrNull(concreteFact(facts, "end_time") ?? event.resolved_at_estimate);
   const startMs = startedAt ? new Date(startedAt).getTime() : NaN;
+  // A planned interruption ends with its announced window unless the operator
+  // still confirms it afterwards. The end is then the operator's announced end,
+  // not an invented one.
+  const plannedEndMs = expectedRestoreAt ? new Date(expectedRestoreAt).getTime() : NaN;
+  const lastConfirmedMs = event.last_confirmed_active_at ? new Date(event.last_confirmed_active_at).getTime() : NaN;
+  const plannedWindowOver = nature === "planned" &&
+    !reportedResolvedAt &&
+    Number.isFinite(startMs) &&
+    Number.isFinite(plannedEndMs) &&
+    plannedEndMs > startMs &&
+    now - plannedEndMs >= PLANNED_WINDOW_GRACE_MS &&
+    !(Number.isFinite(lastConfirmedMs) && lastConfirmedMs > plannedEndMs);
+  const resolvedAt = reportedResolvedAt ?? (plannedWindowOver ? expectedRestoreAt : null);
   const durationMinutes = startedAt && resolvedAt
     ? Math.max(0, Math.round((new Date(resolvedAt).getTime() - startMs) / 60000))
     : null;
@@ -297,7 +319,7 @@ export function toPublicFeedItem(
     (statusFact === "active" || statusFact === "aktiv" || (!statusFact && nature === "unplanned"));
   const status = nature === "planned" && Number.isFinite(startMs) && startMs > now
     ? "upcoming"
-    : statusFact === "resolved" || statusFact === "behoben" || event.status === "resolved"
+    : statusFact === "resolved" || statusFact === "behoben" || event.status === "resolved" || plannedWindowOver
       ? "resolved"
       : statusFact === "historical" || statusFact === "archiviert"
         ? "historical"
@@ -326,7 +348,7 @@ export function toPublicFeedItem(
     active_since_at: activeSinceAt,
     active_since_is_minimum: Boolean(activeSinceAt && !startedAt),
     last_confirmed_active_at: lastConfirmedActiveAt,
-    expected_restore_at: isoOrNull(event.expected_restore_at),
+    expected_restore_at: expectedRestoreAt,
     resolution_earliest_at: isoOrNull(event.resolution_earliest_at),
     resolution_latest_at: isoOrNull(event.resolution_latest_at),
     time_confidence: inferredClosure ? "inferred" : event.time_confidence ?? "unknown",

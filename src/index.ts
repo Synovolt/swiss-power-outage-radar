@@ -2,18 +2,11 @@ import {
   dismissOutageEvent,
   getDebugStatus,
   getMergeSuggestionsForEvent,
-  getEventPlaces,
-  getOutageEvent,
-  getOutageEventFacts,
-  getOutageEventSources,
-  getOutageEventSnapshots,
   getPublicFeedItems,
-  getRelatedPublicFeedItems,
-  listPublishedPublicFeedLite,
-  isPublicEvidenceSnapshot,
   getPublicStatus,
   getRecentItems,
   getSnapshotsNeedingPublicDigest,
+  isPublicEvidenceSnapshot,
   markOutageEventCorroborated,
   mergeOutageEvent,
   updateSourceSnapshotDigest
@@ -24,15 +17,11 @@ import { backfillSourcePlaceMentions, syncOpenPlzLocalities } from "./places";
 import { researchOutageEvent } from "./research";
 import { applyPublicationGate, ingestFirecrawlWebhook, revalidatePublicEvents, runAlertCheck } from "./runner";
 import { loadPublicEventDetail } from "./public-detail";
-import {
-  SITE_ORIGIN,
-  httpsRedirect,
-  publicEventIdFromPath,
-  siteOriginFromRequest
-} from "./public-url";
+import { SITE_ORIGIN, httpsRedirect, siteOriginFromRequest } from "./public-url";
 import { evidenceScreenshotKey } from "./snapshots";
 import { operatorBySlug, resolveOperatorProfile } from "./operators";
-import { renderHomeSeoAsset, renderSeoEventAsset } from "./seo-event-page";
+import { renderSeoEventAsset } from "./seo-event-page";
+import { renderHomeSeoAsset } from "./seo-home";
 import {
   loadOperatorLive,
   operatorSitemapLastmods,
@@ -41,20 +30,56 @@ import {
   renderSeoOperatorHubAsset
 } from "./seo-operator-page";
 import {
+  buildCantonPage,
+  buildPlacePage,
+  buildPlacesHubPage,
+  buildStatsPage,
+  placeIsIndexable,
+  renderDataPage
+} from "./seo-data-pages";
+import {
   buildLlmsTxt,
   buildPublicSitemapDocuments,
   buildRobotsTxt,
   isSitemapPath,
-  sitemapCacheControl
+  sitemapCacheControl,
+  SITEMAP_EVENTS_PATH,
+  SITEMAP_PAGES_PATH,
+  SITEMAP_PLACES_PATH
 } from "./seo-site";
 import {
-  eventCanonicalRedirect,
+  canonicalRoutePath,
   dePrefixTarget,
-  eventsTemplateTarget,
+  eventCanonicalRedirect,
+  parseAppPath,
   parseLocaleFromPath,
-  t
+  t,
+  templateShellTarget
 } from "./i18n";
+import { publicEventIdFromPath } from "./public-url";
+import {
+  getPublicPlace,
+  listPublicFeed,
+  listPublicItems,
+  listPublicItemsLite,
+  readStatsCache,
+  refreshPublicProjection,
+  summarizePublicSlice
+} from "./public-projection";
+import {
+  INDEX_CACHE_KEY,
+  PLACES_CACHE_KEY,
+  STATS_CACHE_KEY,
+  buildPublicIndex,
+  loadAggregateRows,
+  refreshPublicAggregates,
+  type PlacesPayload,
+  type PublicIndexPayload,
+  type StatsPayload
+} from "./public-stats";
+import { cantonBySlug } from "./swiss-cantons";
 import { isBearerAuthorized } from "./auth";
+import { escapeHtml } from "./html";
 import type { Env } from "./types";
 
 function json(data: unknown, init?: ResponseInit): Response {
@@ -67,29 +92,6 @@ function json(data: unknown, init?: ResponseInit): Response {
   });
 }
 
-async function assetResponse(env: Env, request: Request): Promise<Response | null> {
-  const url = new URL(request.url);
-  if (
-    url.pathname.startsWith("/api/") ||
-    url.pathname.startsWith("/admin/") ||
-    url.pathname === "/status" ||
-    url.pathname === "/recent" ||
-    url.pathname === "/run"
-  ) {
-    return null;
-  }
-
-  if (/^\/events\/\d+$/.test(url.pathname)) {
-    const assetUrl = new URL(request.url);
-    assetUrl.pathname = "/events/";
-    const response = await env.ASSETS.fetch(new Request(assetUrl, request));
-    return response.status === 404 ? null : response;
-  }
-
-  const response = await env.ASSETS.fetch(request);
-  return response.status === 404 ? null : response;
-}
-
 function unauthorized(): Response {
   return json({ error: "Unauthorized" }, { status: 401 });
 }
@@ -100,14 +102,6 @@ function badRequest(message: string): Response {
 
 function isAuthorized(request: Request, env: Env): boolean {
   return isBearerAuthorized(request.headers.get("Authorization"), env.ADMIN_TOKEN);
-}
-
-function escapeHtml(value: unknown): string {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
 
 async function readJsonBody(request: Request): Promise<Record<string, unknown>> {
@@ -131,188 +125,23 @@ function bodyNote(body: Record<string, unknown>): string | null {
   return String(note).slice(0, 1000);
 }
 
+/** Internal ops page (bearer protected). Public pages never show feed URLs or secrets. */
 function renderStatusPage(status: Awaited<ReturnType<typeof getPublicStatus>>): string {
   const totals = (status.totals ?? {}) as Record<string, unknown>;
   const lastRun = (status.lastRun ?? {}) as Record<string, unknown>;
   const feedHealth = status.feedHealth as Record<string, unknown>[];
   const events = status.events as Record<string, unknown>[];
-
-  const feeds = feedHealth
-    .map(
-      (feed) => `<tr>
-        <td>${escapeHtml(feed.feed_language)}</td>
-        <td>${escapeHtml(feed.last_success_at ?? "-")}</td>
-        <td>${escapeHtml(feed.items_seen_last_run ?? 0)}</td>
-        <td>${escapeHtml(feed.items_new_last_run ?? 0)}</td>
-        <td>${escapeHtml(feed.last_error ?? "")}</td>
-      </tr>`
-    )
-    .join("");
-
-  const rows = events
-    .map(
-      (event) => `<tr>
-        <td>${escapeHtml(event.last_seen_at ?? event.first_seen_at ?? "-")}</td>
-        <td>${escapeHtml(event.location_text ?? "nicht eindeutig erkannt")}</td>
-        <td>${escapeHtml(event.status ?? "-")}</td>
-        <td>${escapeHtml(event.source_count ?? 0)}</td>
-        <td>${escapeHtml(event.confidence ?? "-")}</td>
-        <td><a href="/events/${escapeHtml(event.id)}">Akte öffnen</a></td>
-      </tr>`
-    )
-    .join("");
-
-  return `<!doctype html>
-<html lang="de">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Stromausfall Radar</title>
-  <style>
-    :root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    body { margin: 0; background: #f7f8f9; color: #172026; }
-    main { max-width: 1080px; margin: 0 auto; padding: 32px 20px 48px; }
-    h1 { margin: 0 0 6px; font-size: clamp(28px, 4vw, 42px); letter-spacing: 0; }
-    h2 { margin: 28px 0 12px; font-size: 18px; }
-    .muted { color: #5c6b73; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 20px 0 4px; }
-    .metric { background: white; border: 1px solid #dde3e7; border-radius: 8px; padding: 14px; }
-    .metric strong { display: block; font-size: 28px; margin-top: 4px; }
-    table { width: 100%; border-collapse: collapse; background: white; border: 1px solid #dde3e7; border-radius: 8px; overflow: hidden; }
-    th, td { padding: 10px 12px; border-bottom: 1px solid #edf1f3; text-align: left; vertical-align: top; font-size: 14px; }
-    th { background: #eef3f6; font-size: 12px; text-transform: uppercase; letter-spacing: 0; }
-    a { color: #0068a8; }
-    @media (prefers-color-scheme: dark) {
-      body { background: #101417; color: #e8ecef; }
-      .muted { color: #9aa7af; }
-      .metric, table { background: #171d21; border-color: #303a40; }
-      th { background: #20282d; }
-      th, td { border-bottom-color: #2a3339; }
-      a { color: #79c6ff; }
-    }
-  </style>
-</head>
-<body>
-<main>
-  <h1>Stromausfall Radar</h1>
-  <p class="muted">Automatisches Monitoring aus Google Alerts. Feed-URLs und Secrets werden hier nicht angezeigt.</p>
-
-  <section class="grid" aria-label="Kennzahlen">
-    <div class="metric">Letzter Run<strong>${escapeHtml(lastRun.status ?? "-")}</strong><span class="muted">${escapeHtml(lastRun.finished_at ?? lastRun.started_at ?? "-")}</span></div>
-    <div class="metric">Items 24h<strong>${escapeHtml(totals.items_last_24h ?? 0)}</strong></div>
-    <div class="metric">Events 24h<strong>${escapeHtml(totals.events_last_24h ?? 0)}</strong></div>
-    <div class="metric">Mails 24h<strong>${escapeHtml(totals.emails_last_24h ?? 0)}</strong></div>
-  </section>
-
-  <h2>Feed-Status</h2>
-  <table>
-    <thead><tr><th>Sprache</th><th>Letzter Erfolg</th><th>Gesehen</th><th>Neu</th><th>Fehler</th></tr></thead>
-    <tbody>${feeds || `<tr><td colspan="5">Noch keine Feed-Prüfung.</td></tr>`}</tbody>
-  </table>
-
-  <h2>Letzte Event-Akten</h2>
-  <table>
-    <thead><tr><th>Zeit</th><th>Ort</th><th>Status</th><th>Quellen</th><th>Confidence</th><th>Link</th></tr></thead>
-    <tbody>${rows || `<tr><td colspan="6">Noch keine Event-Akten.</td></tr>`}</tbody>
-  </table>
-</main>
-</body>
-</html>`;
+  const feeds = feedHealth.map((feed) => `<tr><td>${escapeHtml(feed.feed_language)}</td><td>${escapeHtml(feed.last_success_at ?? "-")}</td><td>${escapeHtml(feed.items_seen_last_run ?? 0)}</td><td>${escapeHtml(feed.items_new_last_run ?? 0)}</td><td>${escapeHtml(feed.last_error ?? "")}</td></tr>`).join("");
+  const rows = events.map((event) => `<tr><td>${escapeHtml(event.last_seen_at ?? event.first_seen_at ?? "-")}</td><td>${escapeHtml(event.location_text ?? "–")}</td><td>${escapeHtml(event.status ?? "-")}</td><td>${escapeHtml(event.source_count ?? 0)}</td><td>${escapeHtml(event.confidence ?? "-")}</td><td><a href="/events/${escapeHtml(event.id)}">#${escapeHtml(event.id)}</a></td></tr>`).join("");
+  return `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>outage.ch · Betrieb</title>
+<style>:root{color-scheme:light dark;font-family:ui-sans-serif,system-ui,sans-serif}body{margin:0;background:Canvas;color:CanvasText}main{max-width:1080px;margin:0 auto;padding:32px 20px}table{width:100%;border-collapse:collapse}th,td{padding:8px 10px;border-bottom:1px solid color-mix(in srgb,CanvasText 12%,transparent);text-align:left;font-size:14px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:20px 0}.metric{border:1px solid color-mix(in srgb,CanvasText 14%,transparent);border-radius:8px;padding:14px}.metric strong{display:block;font-size:26px}</style></head>
+<body><main><h1>outage.ch · Betrieb</h1><p>Interner Status der Quellenpipeline (Netzbetreiberquellen, Discovery-Feeds, Event-Akten).</p>
+<section class="grid"><div class="metric">Letzter Lauf<strong>${escapeHtml(lastRun.status ?? "-")}</strong>${escapeHtml(lastRun.finished_at ?? lastRun.started_at ?? "-")}</div><div class="metric">Items 24h<strong>${escapeHtml(totals.items_last_24h ?? 0)}</strong></div><div class="metric">Events 24h<strong>${escapeHtml(totals.events_last_24h ?? 0)}</strong></div><div class="metric">Mails 24h<strong>${escapeHtml(totals.emails_last_24h ?? 0)}</strong></div></section>
+<h2>Discovery-Feeds</h2><table><thead><tr><th>Sprache</th><th>Letzter Erfolg</th><th>Gesehen</th><th>Neu</th><th>Fehler</th></tr></thead><tbody>${feeds || `<tr><td colspan="5">Keine Prüfung.</td></tr>`}</tbody></table>
+<h2>Letzte Event-Akten</h2><table><thead><tr><th>Zeit</th><th>Ort</th><th>Status</th><th>Quellen</th><th>Confidence</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="6">Keine Event-Akten.</td></tr>`}</tbody></table></main></body></html>`;
 }
 
-async function renderEventPage(env: Env, eventId: number): Promise<Response> {
-  const event = await getOutageEvent(env.DB, eventId);
-  if (!event) return new Response("Event nicht gefunden", { status: 404 });
-  if (
-    event.status === "dismissed" ||
-    event.country !== "CH" ||
-    (event.public_status ?? "hidden") === "hidden" ||
-    (event.event_quality_state ?? "candidate_only") !== "publishable"
-  ) {
-    return new Response("Event nicht öffentlich", { status: 404 });
-  }
-
-  const sources = await getOutageEventSources(env.DB, eventId);
-  const sourceRows = sources
-    .map(
-      (source) => `<tr>
-        <td><a href="${escapeHtml(source.source_url)}" rel="noreferrer">${escapeHtml(source.source_title)}</a></td>
-        <td>${escapeHtml(source.source_name ?? "-")}</td>
-        <td>${escapeHtml(source.published_at ?? "-")}</td>
-        <td>${escapeHtml(source.relation_score ?? "-")}</td>
-      </tr>`
-    )
-    .join("");
-
-  return new Response(`<!doctype html>
-<html lang="de">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${escapeHtml(event.title)}</title>
-  <style>
-    :root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    body { margin: 0; background: #f7f8f9; color: #172026; }
-    main { max-width: 980px; margin: 0 auto; padding: 32px 20px 48px; }
-    a { color: #0068a8; }
-    h1 { margin: 0 0 8px; font-size: clamp(28px, 4vw, 42px); letter-spacing: 0; }
-    h2 { margin: 28px 0 12px; font-size: 18px; }
-    .muted { color: #5c6b73; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin: 20px 0; }
-    .metric { background: white; border: 1px solid #dde3e7; border-radius: 8px; padding: 14px; }
-    .metric span { display: block; color: #5c6b73; font-size: 12px; text-transform: uppercase; }
-    .panel { background: white; border: 1px solid #dde3e7; border-radius: 8px; padding: 16px; }
-    table { width: 100%; border-collapse: collapse; background: white; border: 1px solid #dde3e7; border-radius: 8px; overflow: hidden; }
-    th, td { padding: 10px 12px; border-bottom: 1px solid #edf1f3; text-align: left; vertical-align: top; font-size: 14px; }
-    th { background: #eef3f6; font-size: 12px; text-transform: uppercase; letter-spacing: 0; }
-    @media (prefers-color-scheme: dark) {
-      body { background: #101417; color: #e8ecef; }
-      .muted, .metric span { color: #9aa7af; }
-      .metric, .panel, table { background: #171d21; border-color: #303a40; }
-      th { background: #20282d; }
-      th, td { border-bottom-color: #2a3339; }
-      a { color: #79c6ff; }
-    }
-  </style>
-</head>
-<body>
-<main>
-  <p><a href="/">Zurück zur Übersicht</a></p>
-  <h1>${escapeHtml(event.title)}</h1>
-  <p class="muted">Automatisch erkannte Ereignis-Akte. Nicht offiziell verifiziert.</p>
-
-  <section class="grid">
-    <div class="metric"><span>Status</span>${escapeHtml(event.status)}</div>
-    <div class="metric"><span>Ort</span>${escapeHtml(event.location_text || "nicht eindeutig erkannt")}</div>
-    <div class="metric"><span>Typ</span>${escapeHtml(event.event_type)}</div>
-    <div class="metric"><span>Confidence</span>${escapeHtml(event.confidence)}</div>
-    <div class="metric"><span>First seen</span>${escapeHtml(event.first_seen_at)}</div>
-    <div class="metric"><span>Last seen</span>${escapeHtml(event.last_seen_at)}</div>
-    <div class="metric"><span>Quellen</span>${escapeHtml(event.source_count)}</div>
-  </section>
-
-  <h2>Zusammenfassung</h2>
-  <div class="panel">${escapeHtml(event.summary ?? "")}</div>
-
-  <h2>Warum relevant</h2>
-  <div class="panel">${escapeHtml(event.reason ?? "")}</div>
-
-  <h2>Quellen</h2>
-  <table>
-    <thead><tr><th>Titel</th><th>Quelle</th><th>Publiziert</th><th>Score</th></tr></thead>
-    <tbody>${sourceRows || `<tr><td colspan="4">Keine Quellen gespeichert.</td></tr>`}</tbody>
-  </table>
-</main>
-</body>
-</html>`, {
-    headers: {
-      "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": "no-store"
-    }
-  });
-}
-
-const PUBLIC_CACHE_VERSION = "seo-v8";
+const PUBLIC_CACHE_VERSION = "seo-v9";
 
 function publicCacheRequest(request: Request): Request {
   const url = new URL(request.url);
@@ -327,6 +156,48 @@ function cachePublic(response: Response, request: Request, ctx: ExecutionContext
   return cached;
 }
 
+const CACHE = {
+  home: "public,max-age=60,s-maxage=120,stale-while-revalidate=600",
+  event: "public,max-age=60,s-maxage=300,stale-while-revalidate=1800",
+  data: "public,max-age=120,s-maxage=600,stale-while-revalidate=3600",
+  api: "public,max-age=60,s-maxage=120,stale-while-revalidate=600",
+  text: "public,max-age=300,s-maxage=3600"
+} as const;
+
+function isPublicApi(pathname: string): boolean {
+  return pathname === "/api/public/events" ||
+    pathname === "/api/public/status" ||
+    pathname === "/api/public/index.json" ||
+    pathname === "/api/public/stats.json" ||
+    /^\/api\/public\/events\/\d+$/.test(pathname) ||
+    /^\/api\/public\/evidence\/\d+\.png$/.test(pathname);
+}
+
+/** Pages and files whose responses may be shared through the edge cache. */
+function isCacheablePublicPath(pathname: string): boolean {
+  if (isPublicApi(pathname) || isSitemapPath(pathname) || pathname === "/robots.txt" || pathname === "/llms.txt") return true;
+  const parsed = parseAppPath(pathname);
+  return Boolean(parsed && ["home", "event", "operators", "operator", "stats", "places", "place", "canton"].includes(parsed.route.kind));
+}
+
+async function readIndex(env: Env): Promise<PublicIndexPayload | null> {
+  const cached = await readStatsCache<PublicIndexPayload>(env.DB, INDEX_CACHE_KEY);
+  if (cached) return cached.payload;
+  // Only between a deploy and the first aggregate refresh: build from the projection.
+  const rows = await loadAggregateRows(env.DB).catch(() => []);
+  return rows.length ? buildPublicIndex(rows) : null;
+}
+
+async function readPlaces(env: Env): Promise<PlacesPayload | null> {
+  return (await readStatsCache<PlacesPayload>(env.DB, PLACES_CACHE_KEY))?.payload ?? null;
+}
+
+/** Keeps the public projection in step after an admin action changed events. */
+async function republish(env: Env, eventIds: number[]): Promise<void> {
+  const projection = await refreshPublicProjection(env, { eventIds });
+  await refreshPublicAggregates(env, { projectionChanged: projection.written + projection.removed > 0 });
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const forcedHttps = httpsRedirect(request);
@@ -334,167 +205,209 @@ export default {
 
     const url = new URL(request.url);
     const publicOrigin = siteOriginFromRequest(request);
-    const strippedDe = dePrefixTarget(url.pathname);
-    if (strippedDe && (request.method === "GET" || request.method === "HEAD")) {
-      return Response.redirect(new URL(strippedDe + url.search, publicOrigin).toString(), 301);
+    const isRead = request.method === "GET" || request.method === "HEAD";
+
+    if (isRead) {
+      const strippedDe = dePrefixTarget(url.pathname);
+      if (strippedDe) return Response.redirect(new URL(strippedDe + url.search, publicOrigin).toString(), 301);
+      const shell = templateShellTarget(url.pathname);
+      if (shell) return Response.redirect(new URL(shell + url.search, publicOrigin).toString(), 301);
     }
-    const eventsShell = eventsTemplateTarget(url.pathname);
-    if (eventsShell && (request.method === "GET" || request.method === "HEAD")) {
-      return Response.redirect(new URL(eventsShell + url.search, publicOrigin).toString(), 301);
-    }
-    const isPublicGet = (request.method === "GET" || request.method === "HEAD") && (
-      url.pathname === "/" ||
-      /^\/(fr|it|en)\/?$/.test(url.pathname) ||
-      url.pathname === "/api/public/events" ||
-      /^\/api\/public\/events\/\d+$/.test(url.pathname) ||
-      /^\/api\/public\/evidence\/\d+\.png$/.test(url.pathname) ||
-      url.pathname.startsWith("/stromausfall/") ||
-      /^\/(fr|it|en)\/(?:stromausfall|panne-de-courant|interruzione-di-corrente|power-outage)\//.test(url.pathname) ||
-      url.pathname === "/netzbetreiber" ||
-      url.pathname === "/netzbetreiber/" ||
-      url.pathname.startsWith("/netzbetreiber/") ||
-      /^\/(fr|it|en)\/netzbetreiber(?:\/|$)/.test(url.pathname) ||
-      isSitemapPath(url.pathname) ||
-      url.pathname === "/robots.txt" ||
-      url.pathname === "/llms.txt"
-    );
-    if (isPublicGet && request.method === "GET") {
+
+    if (request.method === "GET" && isCacheablePublicPath(url.pathname)) {
       const cached = await caches.default.match(publicCacheRequest(request));
       if (cached) return cached;
     }
 
+    // Legacy /events/:id links → canonical event URL.
     const legacyEvent = url.pathname.match(/^\/events\/(\d+)\/?$/);
-    if (legacyEvent) {
+    if (legacyEvent && isRead) {
       const detail = await loadPublicEventDetail(env, Number(legacyEvent[1]));
       if (!detail) return new Response("Event nicht gefunden", { status: 404 });
       return Response.redirect(new URL(detail.item.url, publicOrigin).toString(), 301);
     }
 
-    const seoId = publicEventIdFromPath(url.pathname);
-    if (seoId) {
-      const locale = parseLocaleFromPath(url.pathname);
-      const detail = await loadPublicEventDetail(env, seoId);
-      if (!detail) return new Response(t(locale, "notFound"), { status: 404 });
-      const redirectTo = eventCanonicalRedirect(url.pathname, detail.item.url);
-      if (redirectTo) {
-        return Response.redirect(new URL(redirectTo + url.search, publicOrigin).toString(), 301);
-      }
-      const liveProfile = resolveOperatorProfile({
-        name: detail.operator?.name ?? detail.item.source.publisher,
-        domain: detail.operator?.domain ?? detail.item.source.domain,
-        url: detail.operator?.url ?? detail.item.source.url
-      });
-      const live = liveProfile
-        ? await loadOperatorLive(env.DB, liveProfile, { excludeId: seoId })
-        : null;
-      const related = live?.recent.length
-        ? live.recent.slice(0, 6)
-        : await getRelatedPublicFeedItems(env.DB, { excludeId: seoId, limit: 6 });
-      return cachePublic(
-        await renderSeoEventAsset(env, request, detail, related, live),
-        request,
-        ctx,
-        "public,max-age=60,s-maxage=300,stale-while-revalidate=1800"
-      );
-    }
+    const route = isRead ? parseAppPath(url.pathname) : null;
+    if (route && request.method === "GET") {
+      const locale = route.locale;
 
-    if ((url.pathname === "/" || /^\/(fr|it|en)\/?$/.test(url.pathname)) && request.method === "GET") {
-      const { items } = await getPublicFeedItems(env.DB, { limit: 25 });
-      return cachePublic(
-        await renderHomeSeoAsset(env, request, items),
-        request,
-        ctx,
-        "public,max-age=60,s-maxage=120,stale-while-revalidate=600"
-      );
+      if (route.route.kind === "event") {
+        const eventId = publicEventIdFromPath(url.pathname);
+        const detail = eventId ? await loadPublicEventDetail(env, eventId) : null;
+        if (!detail || !eventId) return new Response(t(locale, "notFound"), { status: 404 });
+        const redirectTo = eventCanonicalRedirect(url.pathname, detail.item.url);
+        if (redirectTo) return Response.redirect(new URL(redirectTo + url.search, publicOrigin).toString(), 301);
+        const liveProfile = resolveOperatorProfile({
+          name: detail.operator?.name ?? detail.item.source.publisher,
+          domain: detail.operator?.domain ?? detail.item.source.domain,
+          url: detail.operator?.url ?? detail.item.source.url
+        });
+        const live = liveProfile ? await loadOperatorLive(env.DB, liveProfile, { excludeId: eventId }) : null;
+        const related = live?.recent.length
+          ? live.recent.slice(0, 6)
+          : await listPublicItems(env.DB, { limit: 6, excludeId: eventId });
+        return cachePublic(await renderSeoEventAsset(env, request, detail, related, live), request, ctx, CACHE.event);
+      }
+
+      if (route.route.kind === "home") {
+        return cachePublic(await renderHomeSeoAsset(env, request, { index: await readIndex(env) }), request, ctx, CACHE.home);
+      }
+
+      // Canonical spelling for the data pages (e.g. /fr/stromausfall/x → /fr/panne-de-courant/x).
+      if (["stats", "places", "place", "canton"].includes(route.route.kind)) {
+        const canonical = canonicalRoutePath(url.pathname);
+        if (canonical && canonical !== url.pathname) {
+          return Response.redirect(new URL(canonical + url.search, publicOrigin).toString(), 301);
+        }
+      }
+
+      if (route.route.kind === "stats") {
+        const stats = await readStatsCache<StatsPayload>(env.DB, STATS_CACHE_KEY);
+        return cachePublic(await renderDataPage(env, request, buildStatsPage(stats?.payload ?? null, locale), CACHE.data), request, ctx, CACHE.data);
+      }
+
+      if (route.route.kind === "places") {
+        return cachePublic(await renderDataPage(env, request, buildPlacesHubPage(await readPlaces(env), locale), CACHE.data), request, ctx, CACHE.data);
+      }
+
+      if (route.route.kind === "place") {
+        const slug = route.route.slug;
+        const place = await getPublicPlace(env.DB, slug);
+        if (!place) return new Response(t(locale, "notFound"), { status: 404, headers: { "Cache-Control": "public,max-age=300" } });
+        const [slice, items, places] = await Promise.all([
+          summarizePublicSlice(env.DB, { placeSlug: slug }),
+          listPublicItems(env.DB, { placeSlug: slug, limit: 60 }),
+          readPlaces(env)
+        ]);
+        const nearby = (places?.places ?? []).filter((entry) => place.canton ? entry[2] === place.canton : true);
+        const page = buildPlacePage({
+          slug,
+          name: place.name,
+          canton: place.canton,
+          slice,
+          items,
+          nearby,
+          generatedAt: places?.generatedAt ?? new Date().toISOString()
+        }, locale);
+        return cachePublic(await renderDataPage(env, request, page, CACHE.data), request, ctx, CACHE.data);
+      }
+
+      if (route.route.kind === "canton") {
+        const canton = cantonBySlug(route.route.slug);
+        if (!canton) return new Response(t(locale, "notFound"), { status: 404 });
+        const [slice, items, places, operators] = await Promise.all([
+          summarizePublicSlice(env.DB, { canton: canton.code }),
+          listPublicItems(env.DB, { canton: canton.code, limit: 60 }),
+          readPlaces(env),
+          env.DB.prepare(
+            `SELECT operator_slug AS slug, MAX(publisher) AS name, COUNT(*) AS count
+             FROM public_events WHERE canton = ? AND operator_slug IS NOT NULL
+             GROUP BY operator_slug ORDER BY count DESC LIMIT 12`
+          ).bind(canton.code).all<{ slug: string; name: string; count: number }>()
+        ]);
+        const page = buildCantonPage({
+          canton,
+          slice,
+          items,
+          places: (places?.places ?? []).filter((entry) => entry[2] === canton.code),
+          operators: operators.results,
+          generatedAt: places?.generatedAt ?? new Date().toISOString()
+        }, locale);
+        return cachePublic(await renderDataPage(env, request, page, CACHE.data), request, ctx, CACHE.data);
+      }
     }
 
     const operatorPath = parseOperatorPath(url.pathname);
     if (operatorPath && request.method === "GET") {
       if (operatorPath.hub) {
-        const items = await listPublishedPublicFeedLite(env.DB);
-        return cachePublic(
-          await renderSeoOperatorHubAsset(env, request, items),
-          request,
-          ctx,
-          "public,max-age=60,s-maxage=180,stale-while-revalidate=900"
-        );
+        const items = await listPublicItemsLite(env.DB);
+        return cachePublic(await renderSeoOperatorHubAsset(env, request, items), request, ctx, "public,max-age=60,s-maxage=180,stale-while-revalidate=900");
       }
       const profile = operatorBySlug(operatorPath.slug);
       if (profile) {
         const live = await loadOperatorLive(env.DB, profile);
-        return cachePublic(
-          await renderSeoOperatorAsset(env, request, live),
-          request,
-          ctx,
-          "public,max-age=60,s-maxage=300,stale-while-revalidate=1800"
-        );
+        return cachePublic(await renderSeoOperatorAsset(env, request, live), request, ctx, CACHE.event);
       }
     }
 
-    if (isSitemapPath(url.pathname) && (request.method === "GET" || request.method === "HEAD")) {
-      const headers = {
-        "Content-Type": "application/xml; charset=utf-8",
-        "Cache-Tag": "sitemap"
-      };
+    if (isSitemapPath(url.pathname) && isRead) {
+      const headers = { "Content-Type": "application/xml; charset=utf-8", "Cache-Tag": "sitemap" };
       const cacheControl = sitemapCacheControl(url.pathname);
+      if (request.method === "HEAD") return new Response(null, { status: 200, headers: { ...headers, "Cache-Control": cacheControl } });
       let documents = buildPublicSitemapDocuments();
       try {
-        const items = await listPublishedPublicFeedLite(env.DB, 2000);
+        const [items, places, stats] = await Promise.all([
+          listPublicItemsLite(env.DB),
+          readPlaces(env),
+          readStatsCache<StatsPayload>(env.DB, STATS_CACHE_KEY)
+        ]);
+        const indexablePlaces = (places?.places ?? [])
+          .filter(([, , , count, current, lastAt]) => placeIsIndexable({ total: count, active: current, upcoming: 0, lastAt }))
+          .map(([slug, , , , , lastAt]) => ({ slug, lastAt }));
+        const cantonLastmods = new Map<string, string | null>();
+        for (const [, , canton, , , lastAt] of places?.places ?? []) {
+          if (!canton) continue;
+          const previous = cantonLastmods.get(canton);
+          if (!previous || (lastAt && lastAt > previous)) cantonLastmods.set(canton, lastAt);
+        }
         documents = buildPublicSitemapDocuments({
           events: items.map((item) => ({ url: item.url, updated_at: item.updated_at })),
-          operatorLastmods: operatorSitemapLastmods(items)
+          operatorLastmods: operatorSitemapLastmods(items),
+          places: indexablePlaces,
+          cantons: [...cantonLastmods.entries()].map(([code, lastAt]) => ({ code, lastAt })),
+          statsLastmod: stats?.computedAt ?? null
         });
       } catch {
         documents = buildPublicSitemapDocuments();
       }
-      const xml = url.pathname === "/sitemap-pages.xml"
+      const xml = url.pathname === SITEMAP_PAGES_PATH
         ? documents.pages
-        : url.pathname === "/sitemap-events.xml"
+        : url.pathname === SITEMAP_EVENTS_PATH
           ? documents.events
-          : documents.index;
-      if (request.method === "HEAD") {
-        return new Response(null, { status: 200, headers: { ...headers, "Cache-Control": cacheControl } });
-      }
+          : url.pathname === SITEMAP_PLACES_PATH
+            ? documents.places
+            : documents.index;
       return cachePublic(new Response(xml, { headers }), request, ctx, cacheControl);
     }
 
-    if (url.pathname === "/robots.txt" && (request.method === "GET" || request.method === "HEAD")) {
-      const body = buildRobotsTxt(SITE_ORIGIN);
+    if ((url.pathname === "/robots.txt" || url.pathname === "/llms.txt") && isRead) {
+      const body = url.pathname === "/robots.txt" ? buildRobotsTxt(SITE_ORIGIN) : buildLlmsTxt(SITE_ORIGIN);
       const headers = { "Content-Type": "text/plain; charset=utf-8" };
-      if (request.method === "HEAD") {
-        return new Response(null, { status: 200, headers: { ...headers, "Cache-Control": "public,max-age=300,s-maxage=3600" } });
-      }
-      return cachePublic(new Response(body, { headers }), request, ctx, "public,max-age=300,s-maxage=3600");
+      if (request.method === "HEAD") return new Response(null, { status: 200, headers: { ...headers, "Cache-Control": CACHE.text } });
+      return cachePublic(new Response(body, { headers }), request, ctx, CACHE.text);
     }
 
-    if (url.pathname === "/llms.txt" && (request.method === "GET" || request.method === "HEAD")) {
-      const body = buildLlmsTxt(SITE_ORIGIN);
-      const headers = { "Content-Type": "text/plain; charset=utf-8" };
-      if (request.method === "HEAD") {
-        return new Response(null, { status: 200, headers: { ...headers, "Cache-Control": "public,max-age=300,s-maxage=3600" } });
-      }
-      return cachePublic(new Response(body, { headers }), request, ctx, "public,max-age=300,s-maxage=3600");
+    if (!url.pathname.startsWith("/api/") && !url.pathname.startsWith("/admin/") && !["/status", "/recent", "/run"].includes(url.pathname)) {
+      const asset = await env.ASSETS.fetch(request);
+      if (asset.status !== 404) return asset;
     }
 
-    const asset = await assetResponse(env, request);
-    if (asset) return asset;
+    if (url.pathname === "/api/public/index.json" && request.method === "GET") {
+      const index = await readIndex(env) ?? buildPublicIndex([]);
+      return cachePublic(Response.json(index), request, ctx, CACHE.api);
+    }
+
+    if (url.pathname === "/api/public/stats.json" && request.method === "GET") {
+      const stats = await readStatsCache<StatsPayload>(env.DB, STATS_CACHE_KEY);
+      if (!stats) return json({ error: "Not ready" }, { status: 503 });
+      return cachePublic(Response.json(stats.payload, { headers: { "Access-Control-Allow-Origin": "*" } }), request, ctx, CACHE.data);
+    }
 
     if ((url.pathname === "/api/public/events" || url.pathname === "/api/public/status") && request.method === "GET") {
       const requestedLimit = Number(url.searchParams.get("limit") ?? 10);
       const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(40, Math.floor(requestedLimit))) : 10;
       const before = url.searchParams.get("before");
-      return cachePublic(json({
-        ...(await getPublicFeedItems(env.DB, { limit, before })),
-        generated_at: new Date().toISOString()
-      }), request, ctx, "public,max-age=60,s-maxage=120,stale-while-revalidate=600");
+      let feed = await listPublicFeed(env.DB, { limit, before });
+      // Bridge for the minutes between a fresh deploy and the first projection refresh.
+      if (!feed.items.length && !before) feed = await getPublicFeedItems(env.DB, { limit });
+      return cachePublic(json({ ...feed, generated_at: new Date().toISOString() }), request, ctx, CACHE.api);
     }
 
     const publicEventMatch = url.pathname.match(/^\/api\/public\/events\/(\d+)$/);
     if (publicEventMatch && request.method === "GET") {
-      const eventId = Number(publicEventMatch[1]);
-      const detail = await loadPublicEventDetail(env, eventId);
+      const detail = await loadPublicEventDetail(env, Number(publicEventMatch[1]));
       if (!detail) return json({ error: "Not found" }, { status: 404 });
-      return cachePublic(json(detail), request, ctx, "public,max-age=60,s-maxage=300,stale-while-revalidate=1800");
+      return cachePublic(json(detail), request, ctx, CACHE.event);
     }
 
     const evidenceMatch = url.pathname.match(/^\/api\/public\/evidence\/(\d+)\.png$/);
@@ -508,20 +421,13 @@ export default {
       }), request, ctx, "public,max-age=300,s-maxage=300");
     }
 
+    // ------------------------------------------------------------ admin
+
     if (url.pathname === "/admin/status-page" && request.method === "GET") {
       if (!isAuthorized(request, env)) return unauthorized();
-      const status = await getPublicStatus(env.DB);
-      return new Response(renderStatusPage(status), {
-        headers: {
-          "Content-Type": "text/html; charset=utf-8",
-          "Cache-Control": "no-store"
-        }
+      return new Response(renderStatusPage(await getPublicStatus(env.DB)), {
+        headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }
       });
-    }
-
-    const eventMatch = url.pathname.match(/^\/events\/(\d+)$/);
-    if (eventMatch && request.method === "GET") {
-      return await renderEventPage(env, Number(eventMatch[1]));
     }
 
     if (url.pathname === "/status" && request.method === "GET") {
@@ -548,6 +454,24 @@ export default {
       }
     }
 
+    // Rebuilds the public projection in bounded batches. Call repeatedly after a
+    // deploy until `candidates` is 0, then the cron keeps it current.
+    if (url.pathname === "/admin/projection/rebuild" && request.method === "POST") {
+      if (!isAuthorized(request, env)) return unauthorized();
+      try {
+        const body = await readJsonBody(request);
+        const projection = await refreshPublicProjection(env, {
+          limit: typeof body.limit === "number" ? body.limit : 250,
+          resolveLocations: typeof body.resolve_locations === "number" ? Math.min(10, body.resolve_locations) : 0,
+          sweepOrphans: true
+        });
+        const aggregates = await refreshPublicAggregates(env, { projectionChanged: true, force: body.force_stats === true });
+        return json({ ok: true, projection, aggregates });
+      } catch (error) {
+        return badRequest(error instanceof Error ? error.message : String(error));
+      }
+    }
+
     if (url.pathname === "/admin/events/revalidate" && request.method === "POST") {
       if (!isAuthorized(request, env)) return unauthorized();
       const body = await readJsonBody(request);
@@ -563,18 +487,12 @@ export default {
       try {
         const body = await readJsonBody(request);
         const targetEventId = Number(body.target_event_id ?? body.targetEventId);
-        if (!Number.isInteger(targetEventId) || targetEventId <= 0) {
-          return badRequest("target_event_id is required");
-        }
-
-        const result = await mergeOutageEvent(
-          env.DB,
-          Number(adminMergeMatch[1]),
-          targetEventId,
-          bodyNote(body)
-        );
+        if (!Number.isInteger(targetEventId) || targetEventId <= 0) return badRequest("target_event_id is required");
+        const sourceId = Number(adminMergeMatch[1]);
+        const result = await mergeOutageEvent(env.DB, sourceId, targetEventId, bodyNote(body));
         const target = await refreshEventIntelligence(env, result.target.id, { useAiFactSheet: true });
         await generateMergeSuggestions(env, target.id);
+        await republish(env, [sourceId, target.id]);
         return json({ ok: true, action: "merge", source: result.source, target });
       } catch (error) {
         return badRequest(error instanceof Error ? error.message : String(error));
@@ -586,7 +504,9 @@ export default {
       if (!isAuthorized(request, env)) return unauthorized();
       try {
         const body = await readJsonBody(request);
-        const event = await dismissOutageEvent(env.DB, Number(adminDismissMatch[1]), bodyNote(body));
+        const eventId = Number(adminDismissMatch[1]);
+        const event = await dismissOutageEvent(env.DB, eventId, bodyNote(body));
+        await republish(env, [eventId]);
         return json({ ok: true, action: "dismiss", event });
       } catch (error) {
         return badRequest(error instanceof Error ? error.message : String(error));
@@ -598,11 +518,9 @@ export default {
       if (!isAuthorized(request, env)) return unauthorized();
       try {
         const body = await readJsonBody(request);
-        const event = await markOutageEventCorroborated(
-          env.DB,
-          Number(adminCorroborateMatch[1]),
-          bodyNote(body)
-        );
+        const eventId = Number(adminCorroborateMatch[1]);
+        const event = await markOutageEventCorroborated(env.DB, eventId, bodyNote(body));
+        await republish(env, [eventId]);
         return json({ ok: true, action: "corroborate", event });
       } catch (error) {
         return badRequest(error instanceof Error ? error.message : String(error));
@@ -615,6 +533,7 @@ export default {
       try {
         const result = await researchOutageEvent(env, Number(adminResearchMatch[1]));
         await applyPublicationGate(env, result.event);
+        await republish(env, [result.event.id]);
         return json({
           ok: true,
           action: "research",
@@ -683,13 +602,7 @@ export default {
             sourceUrl: target.source_url,
             excerpt: target.markdown_excerpt
           });
-          await updateSourceSnapshotDigest(
-            env.DB,
-            target.snapshot_id,
-            result.parsed,
-            new Date().toISOString(),
-            result.error ?? null
-          );
+          await updateSourceSnapshotDigest(env.DB, target.snapshot_id, result.parsed, new Date().toISOString(), result.error ?? null);
           if (result.parsed) digested += 1;
           else errors.push(`#${target.snapshot_id}: ${result.error ?? "digest failed"}`);
         }
@@ -706,6 +619,7 @@ export default {
         const eventId = Number(adminFactSheetMatch[1]);
         const event = await refreshEventIntelligence(env, eventId, { useAiFactSheet: true });
         await generateMergeSuggestions(env, eventId);
+        await republish(env, [eventId]);
         return json({
           ok: true,
           action: "fact-sheet",
@@ -722,6 +636,9 @@ export default {
       return json({ ok: true, result: await runAlertCheck(env) });
     }
 
+    if (route && request.method === "GET") {
+      return new Response(t(parseLocaleFromPath(url.pathname), "notFound"), { status: 404 });
+    }
     return json({ error: "Not found" }, { status: 404 });
   },
 

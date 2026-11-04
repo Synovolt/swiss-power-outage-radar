@@ -267,7 +267,7 @@
   right: 0;
   bottom: 0;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   min-height: var(--app-dock-h);
   padding: 0 0.25rem env(safe-area-inset-bottom, 0);
   border-top: 1px solid var(--hairline);
