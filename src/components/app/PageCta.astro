@@ -17,7 +17,7 @@ const { title, description, href, label } = Astro.props;
     <span class="page-cta__title">{title}</span>
     <span class="page-cta__desc">{description}</span>
   </div>
-  <Button as="a" href={href} size="sm" class="page-cta__btn">
+  <Button as="a" href={href} variant="primary" size="sm" class="page-cta__btn">
     {label}
     <ArrowRight class="size-4" />
   </Button>
@@ -30,36 +30,31 @@ const { title, description, href, label } = Astro.props;
     align-items: center;
     justify-content: space-between;
     gap: 0.75rem 1rem;
-    margin-top: 1.5rem;
-    padding: 0.85rem 1rem;
-    border-radius: var(--radius-lg);
-    background: linear-gradient(135deg,
-      color-mix(in oklch, var(--foreground) 4%, var(--card)) 0%,
-      color-mix(in oklch, var(--brand-accent) 6%, var(--card)) 100%
-    );
-    border: 1px solid var(--border);
-    box-shadow: 0 2px 12px color-mix(in oklch, var(--foreground) 4%, transparent);
+    margin-top: 2rem;
+    padding: 0.9rem 1rem;
+    border-radius: var(--radius);
+    border: 1px solid var(--hairline);
+    background: var(--surface);
   }
 
   .page-cta__copy {
     display: grid;
-    gap: 0.15rem;
+    gap: 0.1rem;
     min-width: 0;
     flex: 1;
   }
 
   .page-cta__title {
-    font-family: var(--font-display);
-    font-size: 0.92rem;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    color: var(--foreground);
+    font-size: 0.9375rem;
+    font-weight: 600;
+    letter-spacing: -0.012em;
+    color: var(--text);
   }
 
   .page-cta__desc {
-    font-size: 0.78rem;
-    color: var(--muted-foreground);
-    line-height: 1.4;
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+    line-height: 1.45;
   }
 
   .page-cta__btn {

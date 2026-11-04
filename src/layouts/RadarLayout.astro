@@ -1,8 +1,6 @@
 ---
 import "../styles/global.css";
 import "../styles/app-shell.css";
-import { Button } from "@/components/starwind/button";
-import { ButtonGroup } from "@/components/starwind/button-group";
 import AppLangSwitch from "@/components/app/AppLangSwitch.astro";
 import { DEFAULT_OG_IMAGE_PATH, SITE_ORIGIN, absoluteUrl } from "../public-url";
 import { siteJsonLd } from "../seo-site";
@@ -92,7 +90,9 @@ const nav = [
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={pageDescription} />
     <meta name="twitter:image" content={ogImage} />
-    <meta name="theme-color" content="#f6f4ef" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#fbfbfc" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0e0f11" />
     <script type="application/ld+json" set:html={siteJsonLd(SITE_ORIGIN, locale)} />
     <slot name="head" />
     <title>{title}</title>
@@ -105,26 +105,22 @@ const nav = [
           <span class="app-top__mark" aria-hidden="true">
             <Bolt class="size-4" />
           </span>
-          <span class="min-w-0">
-            <span class="app-top__eyebrow">{eyebrow}</span>
+          <span class="app-top__brand-text">
             <span class="app-top__word">outage.ch</span>
+            <span class="app-top__eyebrow">{eyebrow}</span>
           </span>
         </a>
         <div class="app-top__tools">
           <nav class="app-top__nav" aria-label={t(locale, "nav.main")}>
-            <ButtonGroup>
-              {nav.map((item) => (
-                <Button
-                  as="a"
-                  href={item.href}
-                  variant={activeNav === item.id ? "secondary" : "outline"}
-                  size="sm"
-                  aria-current={activeNav === item.id ? "page" : undefined}
-                >
-                  {item.label}
-                </Button>
-              ))}
-            </ButtonGroup>
+            {nav.map((item) => (
+              <a
+                class="app-top__link"
+                href={item.href}
+                aria-current={activeNav === item.id ? "page" : undefined}
+              >
+                {item.label}
+              </a>
+            ))}
           </nav>
           <AppLangSwitch locale={locale} class="app-langs--header" />
         </div>
@@ -133,29 +129,30 @@ const nav = [
       <main id="app-main" class:list={["app-main", shell === "radar" ? "app-main--radar" : "app-main--content"]}>
         <slot />
         {shell === "content" && (
-          <nav class="mt-10 flex flex-wrap gap-2" aria-label={t(locale, "nav.morePages")}>
-            <Button as="a" href={pathFor({ kind: "about" }, locale)} variant="ghost" size="sm">{t(locale, "nav.about")}</Button>
-            <Button as="a" href={pathFor({ kind: "operators" }, locale)} variant="ghost" size="sm">{t(locale, "nav.operators")}</Button>
-            <Button as="a" href={pathFor({ kind: "guides" }, locale)} variant="ghost" size="sm">{t(locale, "nav.guides")}</Button>
+          <nav class="app-footnav" aria-label={t(locale, "nav.morePages")}>
+            <span class="app-footnav__brand">outage.ch</span>
+            <a href={pathFor({ kind: "about" }, locale)}>{t(locale, "nav.about")}</a>
+            <a href={pathFor({ kind: "operators" }, locale)}>{t(locale, "nav.operators")}</a>
+            <a href={pathFor({ kind: "guides" }, locale)}>{t(locale, "nav.guides")}</a>
           </nav>
         )}
       </main>
 
       <nav class="app-dock" aria-label={t(locale, "nav.dock")}>
         <a href={homeHref} aria-current={activeNav === "radar" ? "page" : undefined}>
-          <RadarIcon class="size-[1.15rem]" aria-hidden="true" />
+          <RadarIcon class="size-5" aria-hidden="true" />
           {t(locale, "nav.radar")}
         </a>
         <a href={pathFor({ kind: "operators" }, locale)} aria-current={activeNav === "operators" ? "page" : undefined}>
-          <Building class="size-[1.15rem]" aria-hidden="true" />
+          <Building class="size-5" aria-hidden="true" />
           {t(locale, "nav.operators")}
         </a>
         <a href={pathFor({ kind: "guides" }, locale)} aria-current={activeNav === "ratgeber" ? "page" : undefined}>
-          <Book class="size-[1.15rem]" aria-hidden="true" />
+          <Book class="size-5" aria-hidden="true" />
           {t(locale, "nav.guides")}
         </a>
         <a href={HELP_GUIDE_PATH} aria-current={activeNav === "help" ? "page" : undefined}>
-          <Help class="size-[1.15rem]" aria-hidden="true" />
+          <Help class="size-5" aria-hidden="true" />
           {t(locale, "nav.help")}
         </a>
       </nav>
