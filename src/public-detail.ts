@@ -177,14 +177,21 @@ function publicFacts(facts: OutageFact[], item: PublicFeedItem): PublicDetailFac
   const area = concreteFact(facts, "affected_area");
   const cause = concreteFact(facts, "cause");
 
-  const isPlanned = ["planned", "geplant"].includes(normalizePlaceText(nature?.value_text));
-  if (start && validIso(start.value_text)) {
-    output.push({ key: "start_time", label: isPlanned ? "Geplanter Beginn" : "Beginn", value: start.value_text, format: "datetime" });
+  // Operator incidents carry no extracted facts: their times live on the item.
+  const natureValue = normalizePlaceText(nature?.value_text) || item.nature;
+  const isPlanned = ["planned", "geplant"].includes(natureValue);
+  const startValue = start && validIso(start.value_text) ? start.value_text : item.started_at;
+  if (startValue && validIso(startValue)) {
+    output.push({ key: "start_time", label: isPlanned ? "Geplanter Beginn" : "Beginn", value: startValue, format: "datetime" });
+  } else if (item.active_since_at && item.active_since_is_minimum) {
+    output.push({ key: "active_since", label: "Erstmals gemeldet", value: item.active_since_at, format: "datetime" });
   }
-  if (end && validIso(end.value_text)) {
-    output.push({ key: "end_time", label: isPlanned ? "Geplantes Ende" : "Behoben", value: end.value_text, format: "datetime" });
+  const endValue = end && validIso(end.value_text)
+    ? end.value_text
+    : item.resolved_at ?? (isPlanned && item.status === "upcoming" ? item.expected_restore_at : null);
+  if (endValue && validIso(endValue)) {
+    output.push({ key: "end_time", label: isPlanned ? "Geplantes Ende" : "Behoben", value: endValue, format: "datetime" });
   }
-  const natureValue = normalizePlaceText(nature?.value_text);
   if (natureValue === "planned" || natureValue === "geplant") {
     output.push({ key: "nature", label: "Art", value: "Geplant", format: "text" });
   } else if (natureValue === "unplanned" || natureValue === "ungeplant") {
@@ -354,7 +361,7 @@ export function buildPublicEventDetail(input: {
     facts.splice(Math.min(2, facts.length), 0, {
       key: "duration",
       label: "Dauer",
-      value: hours ? `${hours} Std.${minutes ? ` ${minutes} Min.` : ""}` : `${minutes} Min.`,
+      value: `${input.item.duration_is_estimate ? "ca. " : ""}${hours ? `${hours} Std.${minutes ? ` ${minutes} Min.` : ""}` : `${minutes} Min.`}`,
       format: "text"
     });
   }

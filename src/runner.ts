@@ -76,6 +76,7 @@ import { assessSourceObservation, observationToClassification } from "./source-q
 import { createAlertSnapshot, createSourceSnapshot } from "./snapshots";
 import { extractAndStoreSourcePlaces } from "./places";
 import { historicalBackfillFacts } from "./historical-backfill";
+import { ingestOperatorPoll, pollOperatorSource } from "./operator-ingest";
 import type {
   AiClassification,
   CandidateAssessment,
@@ -753,6 +754,16 @@ async function processSourceObservation(
   };
 }
 
+/** External geo.admin lookups per run for new operator coordinates (each point once, ever). */
+const OPERATOR_GEOCODES_PER_RUN = 10;
+/** Registry sources polled per run. Each costs exactly one external request. */
+const SOURCES_PER_RUN = 20;
+
+/**
+ * Operator pipeline v2: poll → source_records → incidents (src/operator-ingest.ts).
+ * Operator items no longer pass through alert_items, AI classification,
+ * candidates, facts or fuzzy event matching: their identity is the operator's own.
+ */
 async function collectRegistrySources(env: Env): Promise<{
   sourcesChecked: number;
   observationsSeen: number;
@@ -765,7 +776,7 @@ async function collectRegistrySources(env: Env): Promise<{
   errors: string[];
 }> {
   const now = new Date().toISOString();
-  const sources = await getDueSourceRegistryEntries(env.DB, now, 20);
+  const sources = await getDueSourceRegistryEntries(env.DB, now, SOURCES_PER_RUN);
   const summary = {
     sourcesChecked: 0,
     observationsSeen: 0,
@@ -777,78 +788,21 @@ async function collectRegistrySources(env: Env): Promise<{
     firecrawlCreditsEstimated: 0,
     errors: [] as string[]
   };
+  const geoBudget = { remaining: OPERATOR_GEOCODES_PER_RUN };
 
   for (const source of sources) {
     summary.sourcesChecked += 1;
-    const checkedAt = new Date().toISOString();
-    const fetched = await fetchSourceObservations(env, source, checkedAt);
-    if (fetched.usedFirecrawl) summary.firecrawlCreditsEstimated += 1;
-    if (fetched.error) {
-      const healthy = fetched.transportStatus === "ok" && ["ready", "no_current_outage"].includes(fetched.parserStatus);
-      await updateSourceRegistryHealth(env.DB, source.id, {
-        checkedAt,
-        success: healthy,
-        error: fetched.error,
-        healthStatus: "degraded",
-        transportStatus: fetched.transportStatus,
-        parserStatus: fetched.parserStatus
-      });
-      continue;
+    const polledAt = new Date().toISOString();
+    try {
+      const poll = await pollOperatorSource(env, source, polledAt);
+      if (poll.usedFirecrawl) summary.firecrawlCreditsEstimated += 1;
+      const ingested = await ingestOperatorPoll(env, source, poll, { geoBudget, archive: env.SNAPSHOTS });
+      summary.observationsSeen += ingested.recordsSeen;
+      summary.observationsNew += ingested.recordsNew;
+      if (poll.error && poll.transportStatus === "error") summary.errors.push(`${source.source_key}: ${poll.error}`);
+    } catch (error) {
+      summary.errors.push(`${source.source_key} ingest: ${error instanceof Error ? error.message : String(error)}`);
     }
-
-    summary.observationsSeen += fetched.observations.length;
-    await updateSourceRegistryHealth(env.DB, source.id, {
-      checkedAt,
-      success: true,
-      error: null,
-      healthStatus: "healthy",
-      transportStatus: fetched.transportStatus,
-      parserStatus: fetched.parserStatus,
-      lastObservationAt: fetched.observations.length > 0 ? checkedAt : null
-    });
-
-    const presentEventIds = new Set<number>();
-    for (const input of fetched.observations) {
-      try {
-        const stored = await insertSourceObservation(env.DB, input);
-        if (!stored.inserted) {
-          if (
-            stored.observation.outage_event_id &&
-            ["planned", "unplanned"].includes(stored.observation.canonical_status)
-          ) {
-            presentEventIds.add(stored.observation.outage_event_id);
-            await recordEventSourcePresence(
-              env.DB,
-              stored.observation.outage_event_id,
-              source.id,
-              checkedAt
-            );
-          } else if (
-            stored.observation.outage_event_id &&
-            stored.observation.canonical_status === "resolved"
-          ) {
-            const event = await getOutageEvent(env.DB, stored.observation.outage_event_id);
-            if (event) await applyPublicationGate(env, event);
-          }
-          continue;
-        }
-        summary.observationsNew += 1;
-        const result = await processSourceObservation(env, stored.observation);
-        const linked = await insertSourceObservation(env.DB, input);
-        if (linked.observation.outage_event_id && ["planned", "unplanned"].includes(linked.observation.canonical_status)) {
-          presentEventIds.add(linked.observation.outage_event_id);
-        }
-        if (result.itemNew) summary.itemsNew += 1;
-        if (result.filtered) summary.itemsFiltered += 1;
-        if (result.classified) summary.itemsClassified += 1;
-        if (result.emailSent) summary.emailsSent += 1;
-      } catch (error) {
-        summary.errors.push(
-          `${source.source_key} observation: ${error instanceof Error ? error.message : String(error)}`
-        );
-      }
-    }
-    await reconcileSourcePresence(env.DB, source.id, checkedAt, [...presentEventIds]);
   }
 
   return summary;

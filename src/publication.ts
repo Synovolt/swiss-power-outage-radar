@@ -332,7 +332,22 @@ export function toPublicFeedItem(
             : "historical";
   const inferredClosure = autoClosed ||
     (status === "resolved" && !resolvedAt && event.time_confidence === "inferred");
-  const activeSinceAt = startedAt ?? (status === "active" || status === "stale_unconfirmed" ? isoOrNull(event.first_seen_at) : null);
+  // Operator incidents measure their first sighting from complete polls, so it
+  // is a reliable "started no later than" for every status, not only active.
+  const operatorOrigin = event.origin === "operator";
+  const activeSinceAt = startedAt ?? (operatorOrigin || status === "active" || status === "stale_unconfirmed" ? isoOrNull(event.first_seen_at) : null);
+  const startEarliestAt = !startedAt && operatorOrigin ? isoOrNull(event.start_earliest_at) : null;
+  // Without a reported start or end, the duration is the distance between the
+  // midpoints of the start window and the end window (both one polling interval).
+  let estimatedDuration: number | null = null;
+  if (durationMinutes === null && operatorOrigin && status === "resolved" && activeSinceAt) {
+    const startLatest = new Date(activeSinceAt).getTime();
+    const startEarliest = startEarliestAt ? new Date(startEarliestAt).getTime() : startLatest;
+    const endEarliest = new Date(resolvedAt ?? event.resolution_earliest_at ?? "").getTime();
+    const endLatest = new Date(resolvedAt ?? event.resolution_latest_at ?? "").getTime();
+    const minutes = ((endEarliest + endLatest) / 2 - (startEarliest + startLatest) / 2) / 60000;
+    if (Number.isFinite(minutes) && minutes >= 0 && minutes < 14 * 24 * 60) estimatedDuration = Math.round(minutes);
+  }
   const location = publicDisplayLocation(event.location_text);
   return {
     id: event.id,
@@ -344,9 +359,11 @@ export function toPublicFeedItem(
     resolved_at: resolvedAt,
     status,
     nature,
-    duration_minutes: durationMinutes,
+    duration_minutes: durationMinutes ?? estimatedDuration,
+    duration_is_estimate: durationMinutes === null && estimatedDuration !== null,
     active_since_at: activeSinceAt,
     active_since_is_minimum: Boolean(activeSinceAt && !startedAt),
+    start_earliest_at: startEarliestAt,
     last_confirmed_active_at: lastConfirmedActiveAt,
     expected_restore_at: expectedRestoreAt,
     resolution_earliest_at: isoOrNull(event.resolution_earliest_at),

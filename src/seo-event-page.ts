@@ -93,10 +93,13 @@ function statusLine(detail: PublicEventDetail, locale: AppLocale = "de"): string
       return [
         t(locale, "status.autoClosed"),
         item.last_confirmed_active_at ? t(locale, "event.statusLine.lastConfirm", { date: formatDate(item.last_confirmed_active_at, locale) }) : null,
-        t(locale, "event.statusLine.durationUnknown")
+        item.duration_is_estimate && formatDuration(item.duration_minutes, locale)
+          ? t(locale, "event.statusLine.lasted", { duration: `≈ ${formatDuration(item.duration_minutes, locale)}` })
+          : t(locale, "event.statusLine.durationUnknown")
       ].filter(Boolean).join(" · ");
     }
-    const duration = formatDuration(item.duration_minutes, locale);
+    const rawDuration = formatDuration(item.duration_minutes, locale);
+    const duration = rawDuration && item.duration_is_estimate ? `≈ ${rawDuration}` : rawDuration;
     return [
       item.resolved_at ? t(locale, "status.resolved") : t(locale, "status.resolvedReported"),
       duration ? t(locale, "event.statusLine.lasted", { duration }) : null,
@@ -511,9 +514,10 @@ export function renderEventSeoMarkup(
   const factRows = [
     [t(locale, "event.facts.kind"), item.nature === "planned" ? t(locale, "nature.planned") : item.nature === "unplanned" ? t(locale, "nature.unplanned") : t(locale, "nature.unknown")],
     [t(locale, "event.facts.status"), statusText(detail, locale)],
-    [t(locale, "event.facts.start"), formatDate(item.started_at, locale)],
+    // "≤": first seen by a complete poll, so the outage began no later than that.
+    [t(locale, "event.facts.start"), formatDate(item.started_at, locale) ?? (item.active_since_is_minimum && item.active_since_at ? `≤ ${formatDate(item.active_since_at, locale)}` : null)],
     [t(locale, "event.facts.end"), formatDate(item.resolved_at, locale) ?? (item.status === "resolved" ? t(locale, "event.facts.endUnknown") : null)],
-    [t(locale, "event.facts.duration"), formatDuration(item.duration_minutes, locale)],
+    [t(locale, "event.facts.duration"), item.duration_is_estimate && formatDuration(item.duration_minutes, locale) ? `≈ ${formatDuration(item.duration_minutes, locale)}` : formatDuration(item.duration_minutes, locale)],
     [t(locale, "event.facts.area"), item.affected_area ?? location],
     [t(locale, "event.facts.cause"), item.cause]
   ].filter((row) => row[1]);

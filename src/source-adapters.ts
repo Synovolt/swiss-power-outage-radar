@@ -985,7 +985,12 @@ async function parseKnownApiPayload(
   return null;
 }
 
-async function fetchText(url: string): Promise<{ text: string; error: string | null }> {
+/** Receives the raw response body of the poll, for the raw payload archive. */
+export interface PayloadCapture {
+  payloadText?: string;
+}
+
+async function fetchText(url: string, capture?: PayloadCapture): Promise<{ text: string; error: string | null }> {
   const response = await fetch(url, {
     headers: {
       "User-Agent": "swiss-power-outage-radar/0.3",
@@ -993,6 +998,7 @@ async function fetchText(url: string): Promise<{ text: string; error: string | n
     }
   });
   const text = await response.text().catch(() => "");
+  if (capture) capture.payloadText = text;
   if (!response.ok) return { text, error: `HTTP ${response.status}` };
   return { text, error: null };
 }
@@ -1040,13 +1046,14 @@ function jsonItems(payload: unknown, config: AdapterConfig): unknown[] {
 export async function fetchSourceObservations(
   env: Pick<Env, "FIRECRAWL_API_KEY">,
   source: SourceRegistryEntry,
-  observedAt = new Date().toISOString()
+  observedAt = new Date().toISOString(),
+  capture?: PayloadCapture
 ): Promise<AdapterResult> {
   const config = parseConfig(source);
   try {
     const knownApiUrl = config.api_url;
     if (knownApiUrl && ["bkw-outage", "sak-netzstatus", "romande-energie-pannes", "primeo-netzstatus", "repower-stoerungen", "alertswiss"].includes(source.source_key)) {
-      const fetched = await fetchText(knownApiUrl);
+      const fetched = await fetchText(knownApiUrl, capture);
       if (fetched.error) {
         return { observations: [], error: fetched.error, usedFirecrawl: false, transportStatus: "error", parserStatus: "error" };
       }
@@ -1082,7 +1089,7 @@ export async function fetchSourceObservations(
     }
 
     if (source.source_type === "rss" || source.source_type === "google_alert") {
-      const fetched = await fetchText(source.url);
+      const fetched = await fetchText(source.url, capture);
       if (fetched.error) return { observations: [], error: fetched.error, usedFirecrawl: false, transportStatus: "error", parserStatus: "error" };
       const items = parseRssFeed(fetched.text, config.language ?? "de");
       return {
@@ -1107,7 +1114,7 @@ export async function fetchSourceObservations(
     }
 
     if (source.source_type === "json_api") {
-      const fetched = await fetchText(source.url);
+      const fetched = await fetchText(source.url, capture);
       if (fetched.error) return { observations: [], error: fetched.error, usedFirecrawl: false, transportStatus: "error", parserStatus: "error" };
       const payload = JSON.parse(fetched.text) as unknown;
       const observations = await Promise.all(
@@ -1128,7 +1135,7 @@ export async function fetchSourceObservations(
       return { observations, error: null, usedFirecrawl: false, transportStatus: "ok", parserStatus: "ready" };
     }
 
-    const fetched = await fetchText(source.url);
+    const fetched = await fetchText(source.url, capture);
     const htmlAdapters: Record<string, (source: SourceRegistryEntry, html: string, observedAt: string) => Promise<KnownAdapterPayload>> = {
       "ewz-stoerungen": parseEwzHtml,
       "ewl-luzern-stoerungen": parseEwlHtml,
