@@ -3,11 +3,9 @@ import RadarLayout from "../../../layouts/RadarLayout.astro";
 import { operatorProfileUrl, publicOperatorProfiles, sourceCategoryLabel } from "../../../operators";
 import { SITE_ORIGIN, absoluteUrl } from "../../../public-url";
 import { localeFromParam, localeStaticPaths, pathFor, t, type AppLocale } from "../../../i18n";
-import AppList from "@/components/app/AppList.astro";
-import AppListRow from "@/components/app/AppListRow.astro";
+import AppBreadcrumb from "@/components/app/AppBreadcrumb.astro";
 import PageCta from "@/components/app/PageCta.astro";
-import PageHero from "@/components/app/PageHero.astro";
-import { Alert, AlertDescription } from "@/components/starwind/alert";
+import "../../../styles/data-pages.css";
 
 export function getStaticPaths() {
   return localeStaticPaths();
@@ -60,34 +58,37 @@ const jsonLd = {
   locale={locale}
 >
   <script slot="head" type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
-  <section class="mx-auto w-full max-w-4xl">
-    <PageHero
-      kicker={t(locale, "operator.hubKicker")}
-      title={t(locale, "operator.hubH1")}
-      lede={t(locale, "operator.hubLede")}
-    >
-      <Alert>
-        <AlertDescription id="operator-hub-live">
-          {t(locale, "operator.hubPlaceholder")}
-        </AlertDescription>
-      </Alert>
-    </PageHero>
+  <section class="dp op-hub">
+    <AppBreadcrumb locale={locale} items={[
+      { href: pathFor({ kind: "home" }, locale), label: t(locale, "site.breadcrumbHomeShort") },
+      { label: t(locale, "operator.crumb") }
+    ]} />
 
-    <AppList id="operator-list">
+    <header class="dp-head">
+      <span class="dp-kicker">{t(locale, "operator.hubKicker")}</span>
+      <h1>{t(locale, "operator.hubH1")}</h1>
+      <p class="dp-lede">{t(locale, "operator.hubLede")}</p>
+      <p class="dp-meta" id="operator-hub-live">{t(locale, "operator.hubPlaceholder")}</p>
+    </header>
+
+    <div class="op-list" id="operator-list" role="list">
       {operators.map((operator) => (
-        <AppListRow
-          href={operatorProfileUrl(operator, locale)}
-          data-operator-slug={operator.slug}
-          title={operator.name}
-          description={`${operator.area} · ${sourceCategoryLabel(operator.sourceCategory, locale)}`}
-        />
+        <a href={operatorProfileUrl(operator, locale)} data-operator-slug={operator.slug} class="op-row op-row--none" role="listitem">
+          <span class="op-row__dot" aria-hidden="true"></span>
+          <span class="op-row__main">
+            <span class="op-row__name">{operator.name}</span>
+            <span class="op-row__area">{operator.area} · {sourceCategoryLabel(operator.sourceCategory, locale)}</span>
+          </span>
+        </a>
       ))}
-    </AppList>
+    </div>
 
-    <p class="text-muted-foreground mt-4 max-w-xl text-sm leading-relaxed">
-      {t(locale, "operator.hubMissing")}
-      {" "}<a href="/ratgeber/netzbetreiber-finden/" class="underline underline-offset-4">{t(locale, "operator.findGuide")}</a>.
-    </p>
+    <aside class="dp-help">
+      <div>
+        <p>{t(locale, "operator.hubMissing")}</p>
+      </div>
+      <a class="dp-btn" href="/ratgeber/netzbetreiber-finden/">{t(locale, "operator.findGuide")}<span aria-hidden="true">→</span></a>
+    </aside>
 
     <PageCta
       title={t(locale, "operator.ctaTitle")}

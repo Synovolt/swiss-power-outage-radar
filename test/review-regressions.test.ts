@@ -10,7 +10,8 @@ describe("regressions found in review", () => {
   it("keeps statistics copy intact while collapsing a doubled abbreviation dot", () => {
     const page = buildStatsPage(computePublicStats([], { now: Date.parse("2026-11-04T12:00:00Z") }), "de");
     expect(page.html).toContain("<h1>Stromausfall-Statistik Schweiz</h1>");
-    expect(page.html).toContain("Aktuell aktiv");
+    expect(page.html).toContain("Zurzeit keine Störung gemeldet");
+    expect(page.html).toContain("Meldungen in 30 Tagen");
     expect(page.html).not.toMatch(/Std\.\./);
   });
 

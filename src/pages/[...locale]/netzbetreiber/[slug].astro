@@ -1,12 +1,10 @@
 ---
+/**
+ * Operator page. Reading order: live status (filled by the Worker into
+ * #operator-live), official links, ElCom figures, what outage.ch does with the
+ * source, what to do, FAQ. The static fallback below never claims a state.
+ */
 import RadarLayout from "../../../layouts/RadarLayout.astro";
-import {
-  ELCOM_PRICE_URL,
-  elcomFactsDisclaimer,
-  elcomFactsForSlug,
-  elcomFactsInsight,
-  elcomFactsRows
-} from "../../../elcom-operator-facts";
 import {
   operatorBySlug,
   operatorDefinition,
@@ -19,18 +17,11 @@ import {
   sourceCategoryLabel
 } from "../../../operators";
 import { SITE_ORIGIN, absoluteUrl } from "../../../public-url";
-import { operatorPageJsonLd } from "../../../seo-operator-page";
+import { operatorPageJsonLd, renderElcomFactsSection } from "../../../seo-operator-page";
 import { localeFromParam, localeParam, pathFor, t, APP_LOCALES, type AppLocale } from "../../../i18n";
 import AppBreadcrumb from "@/components/app/AppBreadcrumb.astro";
-import AppList from "@/components/app/AppList.astro";
-import AppListRow from "@/components/app/AppListRow.astro";
-import ArticleLayout from "@/components/app/ArticleLayout.astro";
 import PageCta from "@/components/app/PageCta.astro";
-import PageHero from "@/components/app/PageHero.astro";
-import { Alert, AlertDescription } from "@/components/starwind/alert";
-import { Button } from "@/components/starwind/button";
-import { Prose } from "@/components/starwind/prose";
-import ArrowUpRight from "@tabler/icons/outline/arrow-up-right.svg";
+import "../../../styles/data-pages.css";
 
 export function getStaticPaths() {
   return APP_LOCALES.flatMap((locale) =>
@@ -56,8 +47,12 @@ const languageNote = operatorLanguageNote(operator, locale);
 const sourceText = operatorSourceExplanation(operator, locale);
 const faqs = operatorFaqs(operator, null, locale);
 const related = relatedOperatorProfiles(operator, 4);
-const elcom = elcomFactsForSlug(operator.slug);
+const elcomHtml = renderElcomFactsSection(operator, locale);
 const jsonLd = operatorPageJsonLd(operator, null, SITE_ORIGIN, locale);
+const steps = (["1", "2", "3"] as const).map((id) => ({
+  title: t(locale, `operator.act${id}Title`),
+  body: t(locale, `operator.act${id}Body`, { name: operator.name })
+}));
 ---
 
 <RadarLayout
@@ -70,128 +65,100 @@ const jsonLd = operatorPageJsonLd(operator, null, SITE_ORIGIN, locale);
   locale={locale}
 >
   <script slot="head" id="operator-jsonld" type="application/ld+json" set:html={jsonLd} />
-  <article class="mx-auto w-full max-w-4xl">
+  <article class="dp op-page">
     <AppBreadcrumb locale={locale} items={[
       { href: pathFor({ kind: "home" }, locale), label: t(locale, "site.breadcrumbHomeShort") },
       { href: pathFor({ kind: "operators" }, locale), label: t(locale, "operator.crumb") },
       { label: operator.name }
     ]} />
 
-    <PageHero
-      kicker={t(locale, "operator.kicker", { source: sourceCategoryLabel(operator.sourceCategory, locale) })}
-      title={t(locale, "operator.pageH1", { name: operator.name })}
-      lede={t(locale, "operator.lede", { name: operator.name, area: operator.area })}
-    >
-      <Alert>
-        <AlertDescription>{definition}</AlertDescription>
-      </Alert>
-    </PageHero>
+    <header class="dp-head">
+      <span class="dp-kicker">{t(locale, "operator.kicker", { source: sourceCategoryLabel(operator.sourceCategory, locale) })}</span>
+      <h1>{t(locale, "operator.pageH1", { name: operator.name })}</h1>
+      <p class="dp-lede">{t(locale, "operator.lede", { name: operator.name, area: operator.area })}</p>
+    </header>
 
-    <ArticleLayout locale={locale} links={[
-      { href: "#operator-live", label: t(locale, "operator.tocLive") },
-      ...(elcom ? [{ href: "#operator-facts", label: t(locale, "operator.tocElcom") }] : []),
-      { href: "#quelle", label: t(locale, "operator.tocSource") },
-      { href: "#radar", label: t(locale, "operator.tocRadar") },
-      { href: "#handeln", label: t(locale, "operator.tocAct") },
-      { href: "#faq", label: t(locale, "operator.tocFaq") }
-    ]}>
-      <Prose class="max-w-none text-sm [--prose-heading-spacing:1.05em] [--prose-h2-size:1.2em] [--prose-spacing:0.75em] md:text-[0.95rem]">
-        <section id="operator-live">
-          <h2>{t(locale, "operator.liveHeading")}</h2>
-          <p>{t(locale, "operator.liveEmpty", { name: operator.name })}</p>
-        </section>
-        {elcom && (
-          <section id="operator-facts">
-            <h2>{t(locale, "elcom.heading")}</h2>
-            <p>{elcomFactsInsight(operator.name, elcom, locale)}</p>
-            <div class="stat-grid not-sw-prose">
-              <dl>
-                {elcomFactsRows(elcom, locale).map(([label, value]) => (
-                  <div>
-                    <dt>{label}</dt>
-                    <dd>{value}</dd>
-                  </div>
-                ))}
-              </dl>
-              <p class="stat-grid__note">{elcomFactsDisclaimer(locale)}</p>
-            </div>
-            <p class="not-sw-prose">
-              <Button as="a" href={ELCOM_PRICE_URL} variant="outline" size="sm">
-                {t(locale, "elcom.open")}
-                <ArrowUpRight class="size-4" />
-              </Button>
-            </p>
-          </section>
-        )}
-        <section id="quelle">
-          <h2>{t(locale, "operator.sourceHeading")}</h2>
-          <p>{t(locale, "operator.sourceIntro", { name: operator.name, source: sourceCategoryLabel(operator.sourceCategory, locale), area: operator.area })}</p>
-          <p>{sourceText}</p>
-          {languageNote && <p>{languageNote}</p>}
-          <p class="not-sw-prose">
-            <Button as="a" href={operator.officialUrl} variant="default" size="sm">
-              {t(locale, "operator.officialOpen", { name: operator.name })}
-              <ArrowUpRight class="size-4" />
-            </Button>
-          </p>
-        </section>
-        <section id="radar">
-          <h2>{t(locale, "operator.radarHeading")}</h2>
-          <p>{t(locale, "operator.radarP1", { name: operator.name, minutes: operator.checkMinutes })}</p>
-          <p>{t(locale, "operator.radarP2", { name: operator.name })}</p>
-        </section>
-        <section id="handeln">
-          <h2>{t(locale, "operator.actHeading")}</h2>
-          <ol class="article-steps not-sw-prose">
+    <section id="operator-live" class="op-live">
+      <section class="dp-status dp-status--calm">
+        <span class="dp-status__dot" aria-hidden="true"></span>
+        <div class="dp-status__copy">
+          <span class="dp-status__kicker">{t(locale, "operator.liveHeading")}</span>
+          <p class="dp-status__detail">{t(locale, "operator.liveEmpty", { name: operator.name })}</p>
+        </div>
+        <div class="dp-status__actions">
+          <a class="dp-btn dp-btn--primary" href={operator.officialUrl} target="_blank" rel="noreferrer">{t(locale, "data.common.official")}<span aria-hidden="true">↗</span></a>
+        </div>
+      </section>
+    </section>
+
+    {elcomHtml && <Fragment set:html={elcomHtml} />}
+
+    <section class="dp-card dp-prose" id="quelle">
+      <header class="dp-card__head"><h2>{t(locale, "operator.sourceHeading")}</h2></header>
+      <p class="dp-callout">{definition}</p>
+      <p>{t(locale, "operator.sourceIntro", { name: operator.name, source: sourceCategoryLabel(operator.sourceCategory, locale), area: operator.area })}</p>
+      <p>{sourceText}</p>
+      {languageNote && <p>{languageNote}</p>}
+      <p class="op-actions">
+        <a class="dp-btn" href={operator.officialUrl} target="_blank" rel="noreferrer">{t(locale, "operator.officialOpen", { name: operator.name })}<span aria-hidden="true">↗</span></a>
+      </p>
+    </section>
+
+    <div class="dp-grid dp-grid--2">
+      <section class="dp-card dp-prose" id="handeln">
+        <header class="dp-card__head"><h2>{t(locale, "operator.actHeading")}</h2></header>
+        <ol class="op-steps">
+          {steps.map((step) => (
             <li>
-              <strong>{t(locale, "operator.act1Title")}</strong>
-              <p>{t(locale, "operator.act1Body", { name: operator.name })}</p>
+              <strong>{step.title}</strong>
+              <p>{step.body}</p>
             </li>
-            <li>
-              <strong>{t(locale, "operator.act2Title")}</strong>
-              <p>{t(locale, "operator.act2Body", { name: operator.name })}</p>
-            </li>
-            <li>
-              <strong>{t(locale, "operator.act3Title")}</strong>
-              <p>{t(locale, "operator.act3Body", { name: operator.name })}</p>
-            </li>
-          </ol>
-          <p>
-            {t(locale, "operator.actGuides")}
-            {" "}<a href="/ratgeber/stromausfall-was-tun/">{t(locale, "operator.helpGuide")}</a>
-            {" "}<a href="/ratgeber/netzbetreiber-finden/">{t(locale, "operator.findGuide")}</a>
-          </p>
-        </section>
-        <section id="faq">
-          <h2>{t(locale, "operator.faqHeading", { name: operator.name })}</h2>
-          <div id="operator-faq">
-            {faqs.map((faq) => (
-              <details>
-                <summary>{faq.question}</summary>
-                <p>{faq.answer}</p>
-              </details>
-            ))}
-          </div>
-        </section>
-        {related.length > 0 && (
-          <section aria-labelledby="related-operators-heading">
-            <h2 id="related-operators-heading">{t(locale, "operator.relatedHeading")}</h2>
-            <div class="not-sw-prose">
-              <AppList>
-                {related.map((profile) => (
-                  <AppListRow
-                    href={operatorProfileUrl(profile, locale)}
-                    kicker={sourceCategoryLabel(profile.sourceCategory, locale)}
-                    title={profile.name}
-                    description={profile.area}
-                  />
-                ))}
-              </AppList>
-            </div>
-          </section>
-        )}
-      </Prose>
-    </ArticleLayout>
+          ))}
+        </ol>
+        <p class="op-actions">
+          <a class="dp-btn" href="/ratgeber/stromausfall-was-tun/">{t(locale, "operator.helpGuide")}<span aria-hidden="true">→</span></a>
+        </p>
+      </section>
+
+      <section class="dp-card dp-prose" id="radar">
+        <header class="dp-card__head"><h2>{t(locale, "operator.radarHeading")}</h2></header>
+        <p>{t(locale, "operator.radarP1", { name: operator.name, minutes: operator.checkMinutes })}</p>
+        <p>{t(locale, "operator.radarP2", { name: operator.name })}</p>
+        <p class="op-actions">
+          <a class="dp-btn" href="/ratgeber/netzbetreiber-finden/">{t(locale, "operator.findGuide")}<span aria-hidden="true">→</span></a>
+        </p>
+      </section>
+    </div>
+
+    <section class="dp-card dp-faq" id="faq">
+      <header class="dp-card__head"><h2>{t(locale, "operator.faqHeading", { name: operator.name })}</h2></header>
+      <div id="operator-faq">
+        {faqs.map((faq) => (
+          <details>
+            <summary>{faq.question}</summary>
+            <p>{faq.answer}</p>
+          </details>
+        ))}
+      </div>
+    </section>
+
+    {related.length > 0 && (
+      <section class="op-related" aria-labelledby="related-operators-heading">
+        <h2 id="related-operators-heading" class="dp-section-title">{t(locale, "operator.relatedHeading")}</h2>
+        <div class="op-list" role="list">
+          {related.map((profile) => (
+            <a href={operatorProfileUrl(profile, locale)} class="op-row op-row--none" role="listitem">
+              <span class="op-row__dot" aria-hidden="true"></span>
+              <span class="op-row__main">
+                <span class="op-row__name">{profile.name}</span>
+                <span class="op-row__area">{profile.area}</span>
+              </span>
+            </a>
+          ))}
+        </div>
+      </section>
+    )}
+
     <PageCta
       title={t(locale, "operator.ctaReportsTitle")}
       description={t(locale, "operator.ctaReportsDescription")}

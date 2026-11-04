@@ -23,7 +23,8 @@ import {
   type OperatorLiveStats,
   type OperatorProfile
 } from "./operators";
-import { DEFAULT_OG_IMAGE_PATH, SITE_ORIGIN, absoluteUrl, publicDisplayLocation } from "./public-url";
+import { DEFAULT_OG_IMAGE_PATH, SITE_ORIGIN, absoluteUrl } from "./public-url";
+import { eventRows, factsList, listCard, statusBanner, statusTitle, toneFor } from "./seo-data-pages";
 import { organizationId, websiteId } from "./seo-site";
 import {
   DATE_LOCALE,
@@ -124,68 +125,71 @@ export function renderOperatorStatsGrid(stats: OperatorLiveStats, footnote: stri
 }
 
 function itemLinkHtml(href: string, title: string, description: string, kicker?: string, attrs = ""): string {
-  return `<a href="${escapeHtml(href)}" ${attrs} class="flex w-full items-center gap-2 border-b border-border px-3.5 py-2.5 text-sm last:border-b-0 hover:bg-muted/60">
-    <span class="flex min-w-0 flex-1 flex-col gap-0.5">
-      ${kicker ? `<span class="text-muted-foreground font-mono text-[0.62rem] tracking-wider uppercase">${escapeHtml(kicker)}</span>` : ""}
-      <span class="font-heading font-semibold leading-snug">${escapeHtml(title)}</span>
-      <span class="text-muted-foreground line-clamp-1 text-xs leading-snug">${escapeHtml(description)}</span>
+  return `<a href="${escapeHtml(href)}" ${attrs} class="op-row op-row--none">
+    <span class="op-row__dot" aria-hidden="true"></span>
+    <span class="op-row__main">
+      <span class="op-row__name">${escapeHtml(title)}</span>
+      <span class="op-row__area">${kicker ? `${escapeHtml(kicker)} · ` : ""}${escapeHtml(description)}</span>
     </span>
   </a>`;
 }
 
-function renderEventList(items: PublicFeedItem[], locale: AppLocale = "de"): string {
-  if (!items.length) return "";
-  return `<div class="not-sw-prose overflow-hidden rounded-xl border border-border bg-card">${items.map((item) => {
-    const location = publicDisplayLocation(item.location);
-    const kind = item.nature === "planned" ? t(locale, "nature.plannedList") : t(locale, "nature.unplannedKind");
-    const when = formatDate(item.started_at ?? item.updated_at, locale);
-    return itemLinkHtml(
-      localizeStoredEventUrl(item.url, locale),
-      t(locale, "event.in", { kind, location }),
-      [when, item.nature === "planned" ? t(locale, "nature.planned").toLowerCase() : t(locale, "nature.unplanned").toLowerCase()].filter(Boolean).join(" · "),
-      statusLabel(item.status, locale)
-    );
-  }).join("")}</div>`;
+function radarSearchHref(query: string, locale: AppLocale): string {
+  return `${pathFor({ kind: "home" }, locale)}?q=${encodeURIComponent(query)}`;
 }
 
+/**
+ * Live block of an operator page: status answer first, then the current and
+ * latest reports as the shared radar rows, then the counts.
+ */
 export function renderOperatorLiveSection(live: OperatorLiveContext, locale: AppLocale = "de"): string {
   const { profile, stats, recent } = live;
   const insight = operatorLiveInsight(profile, stats, locale);
-  const footnote = t(locale, "operator.liveFootnote");
+  const rows = eventRows(recent, locale, Date.now());
+  const updated = formatDate(stats.lastUpdatedAt, locale);
+  const banner = statusBanner({
+    tone: toneFor(stats.active, stats.upcoming),
+    kicker: t(locale, "operator.liveHeading"),
+    title: statusTitle(stats, locale, t(locale, "data.common.operatorCalm", { name: profile.name })),
+    detail: [
+      stats.total ? t(locale, "data.common.reportsShort", { count: stats.total }) : t(locale, "data.common.noReports"),
+      updated ? t(locale, "operator.liveUpdated", { date: updated }).replace(/\.$/, "") : null
+    ].filter(Boolean).join(" · "),
+    actions: [
+      { href: profile.officialUrl, label: t(locale, "data.common.official"), primary: true, external: true }
+    ]
+  });
+  const footer = stats.total
+    ? `<a href="${escapeHtml(radarSearchHref(profile.name, locale))}">${escapeHtml(t(locale, "data.common.allOperatorReports", { name: profile.name }))} →</a>`
+    : undefined;
   const places = stats.topLocations.length
-    ? `<p>${escapeHtml(t(locale, "operator.livePlaces", {
+    ? `<p class="op-places">${escapeHtml(t(locale, "operator.livePlaces", {
       places: stats.topLocations.map((place) => `${place.label} (${place.count})`).join(", ")
     }))}</p>`
     : "";
-  const updated = formatDate(stats.lastUpdatedAt, locale);
-  return `<section id="operator-live">
-    <h2>${escapeHtml(t(locale, "operator.liveHeading"))}</h2>
-    <p>${escapeHtml(insight)}</p>
-    ${renderOperatorStatsGrid(stats, footnote, locale)}
-    ${places}
-    ${updated ? `<p>${escapeHtml(t(locale, "operator.liveUpdated", { date: updated }))}</p>` : ""}
-    ${recent.length
-      ? `<h3>${escapeHtml(t(locale, "operator.liveRecent", { name: profile.name }))}</h3>${renderEventList(recent, locale)}`
-      : `<p>${escapeHtml(t(locale, "operator.liveNone", { name: profile.name }))}</p>`}
-  </section>`;
+  const lists = (rows.current ? listCard(t(locale, "data.common.current"), rows.current, { count: rows.currentCount }) : "")
+    + (rows.history
+      ? listCard(t(locale, "data.common.latest"), rows.history, { footer })
+      : rows.current ? "" : `<p class="dp-empty">${escapeHtml(t(locale, "operator.liveNone", { name: profile.name }))}</p>`);
+  const figures = stats.total
+    ? `<section class="dp-card dp-card--facts"><header class="dp-card__head"><h2>${escapeHtml(t(locale, "data.common.facts"))}</h2></header>`
+      + `<p class="op-insight">${escapeHtml(insight)}</p>`
+      + factsList(statsRows(stats, locale).map(([label, value]) => ({ label, value })))
+      + places
+      + `<p class="dp-fact-note">${escapeHtml(t(locale, "operator.liveFootnote"))}</p></section>`
+    : "";
+  return `<section id="operator-live" class="op-live" aria-label="${escapeHtml(t(locale, "operator.liveHeading"))}">${banner}${lists}${figures}</section>`;
 }
 
 export function renderElcomFactsSection(operator: OperatorProfile, locale: AppLocale = "de"): string {
   const facts = elcomFactsForSlug(operator.slug);
   if (!facts) return "";
   const rows = elcomFactsRows(facts, locale);
-  return `<section id="operator-facts">
-    <h2>${escapeHtml(t(locale, "elcom.heading"))}</h2>
-    <p>${escapeHtml(elcomFactsInsight(operator.name, facts, locale))}</p>
-    <div class="stat-grid not-sw-prose">
-      <dl>${rows.map(([label, value]) =>
-        `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`
-      ).join("")}</dl>
-      <p class="stat-grid__note">${escapeHtml(elcomFactsDisclaimer(locale))}</p>
-    </div>
-    <p class="not-sw-prose">
-      <a class="inline-flex h-9 items-center rounded-md border border-border px-4 text-sm hover:bg-muted" href="${escapeHtml(ELCOM_PRICE_URL)}" target="_blank" rel="noreferrer">${escapeHtml(t(locale, "elcom.open"))}</a>
-    </p>
+  return `<section id="operator-facts" class="dp-card dp-card--facts">
+    <header class="dp-card__head"><h2>${escapeHtml(t(locale, "elcom.heading"))}</h2><p>${escapeHtml(elcomFactsInsight(operator.name, facts, locale))}</p></header>
+    ${factsList(rows.map(([label, value]) => ({ label, value })))}
+    <p class="dp-fact-note">${escapeHtml(elcomFactsDisclaimer(locale))}</p>
+    <p class="op-actions"><a class="dp-btn" href="${escapeHtml(ELCOM_PRICE_URL)}" target="_blank" rel="noreferrer">${escapeHtml(t(locale, "elcom.open"))}<span aria-hidden="true">↗</span></a></p>
   </section>`;
 }
 
@@ -194,7 +198,7 @@ export function renderOperatorRelated(operator: OperatorProfile, locale: AppLoca
   if (!related.length) return "";
   return `<section aria-labelledby="related-operators-heading">
     <h2 id="related-operators-heading">${escapeHtml(t(locale, "operator.relatedHeading"))}</h2>
-    <div class="not-sw-prose overflow-hidden rounded-xl border border-border bg-card">${related.map((profile) =>
+    <div class="not-sw-prose op-list">${related.map((profile) =>
       itemLinkHtml(operatorProfileUrl(profile, locale), profile.name, profile.area, sourceCategoryLabel(profile.sourceCategory, locale))
     ).join("")}</div>
   </section>`;
@@ -310,31 +314,34 @@ export function renderOperatorHubLiveFromStats(
   statsBySlug: Record<string, OperatorLiveStats>,
   locale: AppLocale = "de"
 ): { summary: string; list: string } {
-  const count = (slug: string) => statsBySlug[slug]?.total ?? 0;
+  const stat = (slug: string) => statsBySlug[slug] ?? summarizeOperatorEvents([]);
+  // Live ones first (ongoing, then planned), then by number of public reports.
   const operators = [...publicOperatorProfiles()].sort((left, right) => {
-    const delta = count(right.slug) - count(left.slug);
-    if (delta !== 0) return delta;
-    return left.name.localeCompare(right.name, DATE_LOCALE[locale]);
+    const a = stat(left.slug);
+    const b = stat(right.slug);
+    return (b.active - a.active)
+      || (b.upcoming - a.upcoming)
+      || (b.total - a.total)
+      || left.name.localeCompare(right.name, DATE_LOCALE[locale]);
   });
-  const withEvents = operators.filter((operator) => count(operator.slug) > 0).length;
-  const total = operators.reduce((sum, operator) => sum + count(operator.slug), 0);
+  const withEvents = operators.filter((operator) => stat(operator.slug).total > 0).length;
+  const total = operators.reduce((sum, operator) => sum + stat(operator.slug).total, 0);
   const summary = total
     ? t(locale, "operator.hubSummary", { total, withEvents })
     : t(locale, "operator.hubSummaryEmpty");
   const list = operators.map((operator) => {
-    const stats = statsBySlug[operator.slug] ?? summarizeOperatorEvents([]);
-    const countLabel = stats.total
-      ? stats.active
-        ? t(locale, "operator.countActive", { total: stats.total, active: stats.active })
-        : t(locale, "operator.countPublic", { count: stats.total })
-      : sourceCategoryLabel(operator.sourceCategory, locale);
-    return itemLinkHtml(
-      operatorProfileUrl(operator, locale),
-      operator.name,
-      `${operator.area} · ${countLabel}`,
-      undefined,
-      `data-operator-slug="${escapeHtml(operator.slug)}"`
-    );
+    const stats = stat(operator.slug);
+    const tone = stats.active ? "active" : stats.upcoming ? "upcoming" : "calm";
+    const live = [
+      stats.active ? t(locale, "data.common.activeShort", { count: stats.active }) : null,
+      stats.upcoming ? t(locale, "data.common.upcomingShort", { count: stats.upcoming }) : null
+    ].filter(Boolean).join(" · ");
+    const count = stats.total ? t(locale, "data.common.reportsShort", { count: stats.total }) : t(locale, "data.common.noReports");
+    return `<a href="${escapeHtml(operatorProfileUrl(operator, locale))}" data-operator-slug="${escapeHtml(operator.slug)}" class="op-row op-row--${tone}" role="listitem">`
+      + `<span class="op-row__dot" aria-hidden="true"></span>`
+      + `<span class="op-row__main"><span class="op-row__name">${escapeHtml(operator.name)}</span><span class="op-row__area">${escapeHtml(operator.area)}</span></span>`
+      + `<span class="op-row__side">${live ? `<span class="op-row__live">${escapeHtml(live)}</span>` : ""}<span class="op-row__count">${escapeHtml(count)}</span></span>`
+      + `</a>`;
   }).join("");
   return { summary, list };
 }

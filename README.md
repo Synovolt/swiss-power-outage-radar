@@ -115,7 +115,7 @@ Die kanonische Quellenliste steht in D1 unter `source_registry`. Die Migration `
 - Energie Wasser Bern: `https://www.ewb.ch/stoerungsmeldungen/`
 - Repower: `https://www.repower.com/ch/kundencenter/stoerungen-stromausfaelle`
 
-Die erweiterte Seed-Liste wird zusätzlich in `src/source-registry-seeds.ts` gepflegt. Sie enthält die im Projekt priorisierten Betreiberquellen von BKW, EKZ, Romande Energie, Groupe E, ewz, SAK, CKW, AEW, SIG, IWB, Primeo, EBL, AIL, SIL Lausanne, Repower, ewb, WWZ, ewl Luzern, ESB Biel, Stadtwerk Winterthur, St.Galler Stadtwerke, Evolon, EWS, ebs, Energie Uster, IBB Brugg, Regionalwerke Baden, ibw Wohlen, Genossenschaft Elektra, Werke am Zürichsee, Energie Kreuzlingen, EW Neuenhof, EW Urnäsch, Elektra Fislisbach, TB Flawil, TBGN, TBGS, Stadtwerke Gossau, Technische Betriebe Wil, Thurplus, Viteos, OIKEN, EKS, SES, Energie Thun, Regio Energie Solothurn und Alertswiss. Alertswiss wird über den öffentlichen JSON-Feed nur auf strombezogene Warnungen gefiltert. Die Migration `0017_more_operators_alertswiss_json.sql` schreibt diese Quellen nach D1. Betreiberseiten zeigen wo verfügbar einen ElCom-H4-Snapshot (kein individueller Tarif).
+Die erweiterte Seed-Liste wird zusätzlich in `src/source-registry-seeds.ts` gepflegt. Sie enthält die im Projekt priorisierten Betreiberquellen von BKW, EKZ, Romande Energie, Groupe E, ewz, SAK, CKW, AEW, SIG, IWB, Primeo, EBL, AIL, SIL Lausanne, Repower, ewb, WWZ, ewl Luzern, ESB Biel, Stadtwerk Winterthur, St.Galler Stadtwerke, Evolon, EWS, ebs, Energie Uster, IBB Brugg, Regionalwerke Baden, ibw Wohlen, Genossenschaft Elektra, Werke am Zürichsee, Energie Kreuzlingen, EW Neuenhof, EW Urnäsch, Elektra Fislisbach, TB Flawil, TBGN, TBGS, Stadtwerke Gossau, Technische Betriebe Wil, Thurplus, Viteos, OIKEN, EKS, SES, Energie Thun, Regio Energie Solothurn, AIM Mendrisio, AGE Chiasso, EW Davos und Alertswiss. Alertswiss wird über den öffentlichen JSON-Feed nur auf strombezogene Warnungen gefiltert. Die Migration `0017_more_operators_alertswiss_json.sql` schreibt diese Quellen nach D1, `0022_southern_and_eastern_operators.sql` ergänzt AIM (Kartenliste "Interruzioni programmate"), AGE (WordPress-JSON der Strom-Kategorien), EW Davos (Box "Netzzustand") und die Thurplus-Box "Aktuelle Störungen"; Stadtwerke Gossau wird dort deaktiviert, weil keine Störungsliste mehr existiert. Betreiberseiten zeigen wo verfügbar einen ElCom-H4-Snapshot (kein individueller Tarif).
 
 Wichtige Felder:
 
@@ -138,7 +138,7 @@ Polling-Regel:
 
 Bei generischen HTML-Seiten gilt ein Sicherheitsmodus: negative Statusmeldungen wie "keine Störung" werden als erfolgreiche `irrelevant`-Observation gespeichert. Nicht-negative Treffer aus Karten-, News-, Multi-Utility- oder nicht verifizierten Vollseiten werden dagegen mit `parser_needs_adapter` gestoppt, bis ein item-spezifischer Adapter oder stabiler JSON/API-Endpunkt vorhanden ist. Dadurch werden Archiv-, Navigations- und FAQ-Texte nicht als Stromausfall-Kandidaten veröffentlicht.
 
-**Seit Pipeline v2** (Migration `0022_operator_records.sql`, [docs/data-pipeline.md](docs/data-pipeline.md)) wird jedes Betreiber-Item zu einem `source_records`-Eintrag mit der Identität des Betreibers (BKW-Trafonummer, Romande-/SAK-UUID, Primeo Titel + Start). Beginn und Ende werden aus vollständigen Abfragen gemessen, Ereignisse (`outage_events.origin = 'operator'`) daraus abgeleitet. Fernwärme-, Wasser- und Gasmeldungen werden verworfen. Der folgende Abschnitt beschreibt die Beobachtungs-Klassifikation der Item-Adapter, die weiterhin die Rohsignale für HTML-Quellen liefert.
+**Seit Pipeline v2** (Migration `0023_operator_records.sql`, [docs/data-pipeline.md](docs/data-pipeline.md)) wird jedes Betreiber-Item zu einem `source_records`-Eintrag mit der Identität des Betreibers (BKW-Trafonummer, Romande-/SAK-UUID, Primeo Titel + Start). Beginn und Ende werden aus vollständigen Abfragen gemessen, Ereignisse (`outage_events.origin = 'operator'`) daraus abgeleitet. Fernwärme-, Wasser- und Gasmeldungen werden verworfen. Der folgende Abschnitt beschreibt die Beobachtungs-Klassifikation der Item-Adapter, die weiterhin die Rohsignale für HTML-Quellen liefert.
 
 Die Adapter schreiben immutable `source_observations` mit `canonical_status`:
 
@@ -272,7 +272,7 @@ curl -X POST https://outage.ch/admin/projection/rebuild   -H "Authorization: Bea
 
 Danach einmal ohne `full` und mit `"force_stats":true` aufrufen. Das setzt die Watermark für die inkrementellen Läufe und berechnet die Statistik.
 
-Einmalig beim Wechsel auf Pipeline v2 (Migration `0022`): Historie mit `scripts/rebuild-operator-history.mts` aus einem frischen Prod-Export neu aufbauen und das erzeugte SQL vor dem Deploy einspielen. Ablauf und Grenzen in [docs/data-pipeline.md](docs/data-pipeline.md#historie-neu-aufbauen). Kennzahlen vor und nach einer Änderung liefert `npx vite-node scripts/data-quality-report.mts -- --db <kopie.db> --project`.
+Einmalig beim Wechsel auf Pipeline v2 (Migration `0023`): Historie mit `scripts/rebuild-operator-history.mts` aus einem frischen Prod-Export neu aufbauen und das erzeugte SQL vor dem Deploy einspielen. Ablauf und Grenzen in [docs/data-pipeline.md](docs/data-pipeline.md#historie-neu-aufbauen). Kennzahlen vor und nach einer Änderung liefert `npx vite-node scripts/data-quality-report.mts -- --db <kopie.db> --project`.
 
 Nach dem Deployment:
 

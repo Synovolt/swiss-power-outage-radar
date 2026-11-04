@@ -59,7 +59,7 @@ const UNEVIDENCED_EPISODE_GAP_MS = 6 * 60 * 60 * 1000;
 // 0. Schema: bring the copy to the target migrations.
 // ---------------------------------------------------------------------------
 const applied = new Set(all<{ name: string }>("SELECT name FROM d1_migrations").map((row) => row.name));
-for (const file of ["0021_ail_service_notices.sql", "0022_operator_records.sql"]) {
+for (const file of ["0021_ail_service_notices.sql", "0022_southern_and_eastern_operators.sql", "0023_operator_records.sql"]) {
   if (applied.has(file)) continue;
   db.exec(readFileSync(`migrations/${file}`, "utf8"));
   db.prepare("INSERT INTO d1_migrations (name, applied_at) VALUES (?, datetime('now'))").run(file);

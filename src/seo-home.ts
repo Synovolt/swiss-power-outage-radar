@@ -14,6 +14,7 @@ import {
   groupItems,
   groupsHtml,
   inView,
+  limitRecent,
   sortForView,
   viewCounts,
   type RadarItem
@@ -45,7 +46,7 @@ export function renderHomeList(items: RadarItem[], locale: AppLocale, now = Date
   const copy = radarViewCopy(locale);
   const visible = sortForView(items.filter((item) => inView(item, "now", now)), "now");
   if (!visible.length) return `<p class="radar__empty">${escapeHtml(copy.empty.now)}</p>`;
-  return groupsHtml(groupItems(visible, "now", now, copy), now, copy);
+  return groupsHtml(limitRecent(groupItems(visible, "now", now, copy)), now, copy);
 }
 
 /** Visible, crawlable context at the end of the radar panel (no hidden SEO text). */
@@ -80,7 +81,8 @@ export async function renderHomeSeoAsset(
   const items = fromIndex(input.index);
   const copy = radarViewCopy(locale);
   const generatedAt = input.index?.generatedAt ?? new Date(now).toISOString();
-  const description = homeLiveDescription(locale, homeLiveCounts(items, now), generatedAt);
+  const live = homeLiveCounts(items, now);
+  const description = homeLiveDescription(locale, live, generatedAt);
   // The home subset carries counts over the full index; fall back to counting what we have.
   const counts = input.index?.counts ?? viewCounts(items, "", now);
   const embedded = input.raw ? input.raw.replace(/</g, "\\u003c") : input.index ? inlineJson(input.index) : "null";
@@ -107,7 +109,25 @@ export async function renderHomeSeoAsset(
           if (view && view in counts) element.setInnerContent(String(counts[view]));
         }
       })
-      .on("#radar-fab-count", { element(element) { element.setInnerContent(String(counts.now)); } });
+      .on("[data-live-count]", {
+        element(element) {
+          const key = element.getAttribute("data-live-count");
+          if (key === "active") element.setInnerContent(String(live.active));
+          if (key === "upcoming") element.setInnerContent(String(counts.planned));
+        }
+      })
+      .on("[data-live-label]", {
+        element(element) {
+          const key = element.getAttribute("data-live-label");
+          if (key === "active") element.setInnerContent(live.active === 1 ? copy.tiles.activeOne : copy.tiles.activeOther);
+          if (key === "upcoming") element.setInnerContent(counts.planned === 1 ? copy.tiles.plannedOne : copy.tiles.plannedOther);
+        }
+      })
+      .on("[data-live]", {
+        element(element) {
+          if (live.active > 0) element.setAttribute("data-has-active", "");
+        }
+      });
   }
   return rewriter.transform(new Response(asset.body, {
     status: asset.status,

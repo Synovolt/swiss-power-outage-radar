@@ -1,5 +1,5 @@
 /**
- * Operator pipeline v2 (see migrations/0022_operator_records.sql):
+ * Operator pipeline v2 (see migrations/0023_operator_records.sql):
  *
  *   raw payload (R2, on change) → source_polls → source_records → incidents
  *   (outage_events origin='operator') → public projection

@@ -428,17 +428,20 @@ export const SOURCE_REGISTRY_SEEDS: SourceRegistrySeed[] = [
     adapter_config: { language: "de", status_mode: "news_feed", utility_filter: "electricity_only", no_outage_terms: commonNoOutageTerms }
   },
   {
+    // The one-off "Aktuelle Störungsmeldung" post (Nov 2024) was deleted and
+    // Stadtwerke Gossau keeps no outage list: migration 0022 disables polling,
+    // the seed keeps the homepage for the operator page.
     source_key: "sw-gossau-stoerungsmeldung",
     operator_name: "Stadtwerke Gossau",
     source_type: "html",
-    source_category: "news_feed",
-    url: "https://sw-gossau.ch/newsroom/aktuelle-stoerungsmeldung/",
+    source_category: "discovery_only",
+    url: "https://sw-gossau.ch/",
     area_text: "Gossau SG",
     trust_level: "official",
-    check_interval_minutes: 30,
+    check_interval_minutes: 60,
     priority: 36,
     firecrawl_enabled: 0,
-    adapter_config: { language: "de", status_mode: "news_feed", utility_filter: "electricity_only", no_outage_terms: commonNoOutageTerms }
+    adapter_config: { language: "de", status_mode: "homepage_discovery", utility_filter: "electricity_only", no_outage_terms: commonNoOutageTerms }
   },
   {
     source_key: "tb-wil-news",
@@ -454,17 +457,17 @@ export const SOURCE_REGISTRY_SEEDS: SourceRegistrySeed[] = [
     adapter_config: { language: "de", status_mode: "news_feed", utility_filter: "electricity_only", no_outage_terms: commonNoOutageTerms }
   },
   {
-    source_key: "thurplus-presse",
+    source_key: "thurplus-stoerungen",
     operator_name: "Thurplus",
     source_type: "html",
-    source_category: "news_feed",
-    url: "https://www.thurplus.ch/ueber-thurplus/presse/",
+    source_category: "live_status",
+    url: "https://www.thurplus.ch/fuer-private/kundenservice/stoerung/stoerungsdienst.html/67",
     area_text: "Frauenfeld und Thurplus Versorgungsgebiet",
     trust_level: "official",
     check_interval_minutes: 30,
     priority: 32,
     firecrawl_enabled: 0,
-    adapter_config: { language: "de", status_mode: "news_feed", utility_filter: "electricity_only", no_outage_terms: commonNoOutageTerms }
+    adapter_config: { language: "de", status_mode: "thurplus_aktuelle_stoerungen", utility_filter: "electricity_only", no_outage_terms: commonNoOutageTerms }
   },
   {
     source_key: "viteos-actualites",
@@ -530,6 +533,45 @@ export const SOURCE_REGISTRY_SEEDS: SourceRegistrySeed[] = [
     priority: 87,
     firecrawl_enabled: 0,
     adapter_config: { language: "it", status_mode: "ail_comunicati", utility_filter: "electricity_only", no_outage_terms: ["nessun guasto", "nessuna interruzione", ...commonNoOutageTerms] }
+  },
+  {
+    source_key: "aim-mendrisio-interruzioni",
+    operator_name: "AIM Mendrisio",
+    source_type: "html",
+    source_category: "live_status",
+    url: "https://aim.mendrisio.ch/web/news-e-approfondimenti/interruzioni-programmate.html",
+    area_text: "Mendrisio und AIM Versorgungsgebiet im Mendrisiotto",
+    trust_level: "official",
+    check_interval_minutes: 30,
+    priority: 72,
+    firecrawl_enabled: 0,
+    adapter_config: { language: "it", status_mode: "aim_interruzioni_programmate", utility_filter: "electricity_only", no_outage_terms: ["nessuna interruzione", ...commonNoOutageTerms] }
+  },
+  {
+    source_key: "age-chiasso-interruzioni",
+    operator_name: "AGE Chiasso",
+    source_type: "html",
+    source_category: "live_status",
+    url: "https://age-sa.ch/",
+    area_text: "Chiasso, Balerna, Morbio Inferiore und Vacallo",
+    trust_level: "official",
+    check_interval_minutes: 30,
+    priority: 70,
+    firecrawl_enabled: 0,
+    adapter_config: { language: "it", status_mode: "operator_api", api_url: "https://age-sa.ch/wp-json/wp/v2/posts?categories=19,24&per_page=20&_fields=id,date,link,title,categories,acf", utility_filter: "electricity_only", no_outage_terms: ["nessuna interruzione", ...commonNoOutageTerms] }
+  },
+  {
+    source_key: "ewd-davos-netzzustand",
+    operator_name: "EW Davos",
+    source_type: "html",
+    source_category: "live_status",
+    url: "https://www.ewd.ch/",
+    area_text: "Gemeinde Davos",
+    trust_level: "official",
+    check_interval_minutes: 30,
+    priority: 68,
+    firecrawl_enabled: 0,
+    adapter_config: { language: "de", status_mode: "ewd_netzzustand", utility_filter: "electricity_only", no_outage_terms: ["momentan keine störung", ...commonNoOutageTerms] }
   },
   {
     source_key: "sil-lausanne",

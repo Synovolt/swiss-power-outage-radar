@@ -84,12 +84,101 @@ function crumbs(locale: AppLocale, trail: Array<{ label: string; href?: string }
   };
 }
 
+
+// ------------------------------------------------------------- building blocks
+// Shared with the operator pages (src/seo-operator-page.ts). Styles: src/styles/data-pages.css.
+
+export type StatusTone = "active" | "upcoming" | "calm";
+
+export function toneFor(active: number, upcoming: number): StatusTone {
+  return active > 0 ? "active" : upcoming > 0 ? "upcoming" : "calm";
+}
+
+function capitalize(value: string): string {
+  return value ? value.charAt(0).toLocaleUpperCase() + value.slice(1) : value;
+}
+
+export interface BannerAction {
+  href: string;
+  label: string;
+  primary?: boolean;
+  external?: boolean;
+}
+
+export function actionLink(action: BannerAction): string {
+  const external = action.external ? ' target="_blank" rel="noreferrer"' : "";
+  return `<a class="dp-btn${action.primary ? " dp-btn--primary" : ""}" href="${escapeHtml(action.href)}"${external}>${escapeHtml(action.label)}${action.external ? '<span aria-hidden="true">↗</span>' : '<span aria-hidden="true">→</span>'}</a>`;
+}
+
+/** The answer to "is anything going on here right now?" — always the first thing on a page. */
+export function statusBanner(input: {
+  tone: StatusTone;
+  title: string;
+  kicker?: string;
+  detail?: string;
+  actions?: BannerAction[];
+  titleId?: string;
+}): string {
+  return `<section class="dp-status dp-status--${input.tone}">`
+    + `<span class="dp-status__dot" aria-hidden="true"></span>`
+    + `<div class="dp-status__copy">`
+    + (input.kicker ? `<span class="dp-status__kicker">${escapeHtml(input.kicker)}</span>` : "")
+    + `<p class="dp-status__title"${input.titleId ? ` id="${escapeHtml(input.titleId)}"` : ""}>${escapeHtml(input.title)}</p>`
+    + (input.detail ? `<p class="dp-status__detail">${escapeHtml(input.detail)}</p>` : "")
+    + `</div>`
+    + (input.actions?.length ? `<div class="dp-status__actions">${input.actions.map(actionLink).join("")}</div>` : "")
+    + `</section>`;
+}
+
+/** "1 aktive Störung · 2 geplante Unterbrüche" or the calm sentence when nothing is going on. */
+export function statusTitle(counts: { active: number; upcoming: number }, locale: AppLocale, calm: string): string {
+  if (!counts.active && !counts.upcoming) return calm;
+  return capitalize(statusLine(counts, locale));
+}
+
+/** A card whose body is an edge-to-edge list of event rows. */
+export function listCard(title: string, body: string, options: { count?: number; footer?: string; id?: string } = {}): string {
+  return `<section class="dp-card dp-card--flush"${options.id ? ` id="${escapeHtml(options.id)}"` : ""}>`
+    + `<header class="dp-card__head"><h2>${escapeHtml(title)}</h2>${typeof options.count === "number" ? `<span class="dp-count">${options.count}</span>` : ""}</header>`
+    + body
+    + (options.footer ? `<footer class="dp-card__foot">${options.footer}</footer>` : "")
+    + `</section>`;
+}
+
+export function factsList(rows: Array<{ label: string; value: string; note?: string }>): string {
+  return `<dl class="dp-facts">${rows.map((row) =>
+    `<div><dt>${escapeHtml(row.label)}</dt><dd>${escapeHtml(row.value)}</dd>${row.note ? `<span>${escapeHtml(row.note)}</span>` : ""}</div>`
+  ).join("")}</dl>`;
+}
+
+/** Current/upcoming rows and the grouped history, split from one list of public items. */
+export function eventRows(items: PublicFeedItem[], locale: AppLocale, now: number): { current: string; history: string; currentCount: number; historyCount: number } {
+  const copy = radarViewCopy(locale);
+  const radarItems = items.map(fromPublicItem);
+  const current = sortForView(radarItems.filter((item) => item.status === "active" || item.status === "upcoming"), "now");
+  const past = radarItems.filter((item) => item.status !== "active" && item.status !== "upcoming").sort((a, b) => b.sortMs - a.sortMs);
+  return {
+    current: current.length ? `<div class="dp-list">${current.map((item) => rowHtml(item, now, copy)).join("")}</div>` : "",
+    history: past.length ? `<div class="dp-list">${groupsHtml(groupItems(past, "history", now, copy), now, copy)}</div>` : "",
+    currentCount: current.length,
+    historyCount: past.length
+  };
+}
+
+function radarSearchHref(query: string, locale: AppLocale): string {
+  return `${pathFor({ kind: "home" }, locale)}?q=${encodeURIComponent(query)}`;
+}
+
 function kpi(label: string, value: string, note?: string, tone?: string): string {
   return `<div class="kpi${tone ? ` kpi--${tone}` : ""}"><span class="kpi__label">${escapeHtml(label)}</span><strong class="kpi__value">${escapeHtml(value)}</strong>${note ? `<span class="kpi__note">${escapeHtml(note)}</span>` : ""}</div>`;
 }
 
-function card(title: string, body: string, note?: string, id?: string): string {
-  return `<section class="dp-card"${id ? ` id="${escapeHtml(id)}"` : ""}><header class="dp-card__head"><h2>${escapeHtml(title)}</h2>${note ? `<p>${escapeHtml(note)}</p>` : ""}</header>${body}</section>`;
+function card(title: string, body: string, options: { note?: string; takeaway?: string; id?: string; className?: string } = {}): string {
+  return `<section class="dp-card${options.className ? ` ${options.className}` : ""}"${options.id ? ` id="${escapeHtml(options.id)}"` : ""}>`
+    + `<header class="dp-card__head"><h2>${escapeHtml(title)}</h2>`
+    + (options.takeaway ? `<p class="dp-takeaway">${escapeHtml(options.takeaway)}</p>` : "")
+    + (options.note ? `<p>${escapeHtml(options.note)}</p>` : "")
+    + `</header>${body}</section>`;
 }
 
 function hoursText(hours: number | null, locale: AppLocale): string {
@@ -101,10 +190,6 @@ function hoursText(hours: number | null, locale: AppLocale): string {
 function minutesText(minutes: number | null, locale: AppLocale): string {
   if (minutes === null) return "–";
   return formatAppDuration(Math.round(minutes), locale) ?? "–";
-}
-
-function cantonLabel(code: string | null, locale: AppLocale): string | null {
-  return code ? cantonByCode(code)?.names[locale] ?? code : null;
 }
 
 function cantonHref(canton: SwissCanton, locale: AppLocale): string {
@@ -123,24 +208,14 @@ function statusLine(slice: Pick<PublicSlice, "active" | "upcoming">, locale: App
   return parts.join(" · ");
 }
 
-function eventLists(items: PublicFeedItem[], locale: AppLocale, now: number): string {
-  const copy = radarViewCopy(locale);
-  const radarItems = items.map(fromPublicItem);
-  const current = sortForView(radarItems.filter((item) => item.status === "active" || item.status === "upcoming"), "now");
-  const past = radarItems.filter((item) => item.status !== "active" && item.status !== "upcoming").sort((a, b) => b.sortMs - a.sortMs);
-  const currentHtml = current.length
-    ? `<div class="dp-list">${current.map((item) => rowHtml(item, now, copy)).join("")}</div>`
-    : `<p class="dp-empty">${escapeHtml(t(locale, "data.common.noCurrent"))}</p>`;
-  const historyHtml = past.length
-    ? `<div class="dp-list">${groupsHtml(groupItems(past, "history", now, copy), now, copy)}</div>`
-    : `<p class="dp-empty">${escapeHtml(t(locale, "data.common.noHistory"))}</p>`;
-  return card(t(locale, "data.common.current"), currentHtml) + card(t(locale, "data.common.history"), historyHtml);
+function fold(value: string): string {
+  return value.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase();
 }
 
 function placeLinks(places: PlacesPayload["places"], locale: AppLocale, limit = 400): string {
   if (!places.length) return "";
   return `<ul class="dp-chips">${places.slice(0, limit).map(([slug, name, , count, current]) =>
-    `<li><a href="${escapeHtml(placeHref(slug, locale))}"${current ? ' class="is-live"' : ""}>${escapeHtml(name)}<span>${count}</span></a></li>`
+    `<li data-name="${escapeHtml(fold(name))}"><a href="${escapeHtml(placeHref(slug, locale))}"${current ? ' class="is-live"' : ""}>${current ? '<i aria-hidden="true"></i>' : ""}${escapeHtml(name)}<span>${count}</span></a></li>`
   ).join("")}</ul>`;
 }
 
@@ -156,7 +231,11 @@ function faqHtml(title: string, entries: Array<{ q: string; a: string }>): { htm
 }
 
 function helpCard(locale: AppLocale): string {
-  return `<aside class="dp-help"><strong>${escapeHtml(t(locale, "data.common.whatToDo"))}</strong><p>${escapeHtml(t(locale, "data.common.whatToDoText"))}</p><a href="/ratgeber/stromausfall-was-tun/">${escapeHtml(t(locale, "data.radar.guideLink"))} →</a></aside>`;
+  return `<aside class="dp-help"><div><strong>${escapeHtml(t(locale, "data.common.whatToDo"))}</strong><p>${escapeHtml(t(locale, "data.common.whatToDoText"))}</p></div><a class="dp-btn" href="/ratgeber/stromausfall-was-tun/">${escapeHtml(t(locale, "data.radar.guideLink"))}<span aria-hidden="true">→</span></a></aside>`;
+}
+
+function head(h1: string, lede: string, meta?: string): string {
+  return `<header class="dp-head"><h1>${escapeHtml(h1)}</h1><p class="dp-lede">${escapeHtml(lede)}</p>${meta ? `<p class="dp-meta">${meta}</p>` : ""}</header>`;
 }
 
 // ------------------------------------------------------------------ stats
@@ -179,10 +258,9 @@ export function buildStatsPage(stats: StatsPayload | null, locale: AppLocale, no
   const delta = totals.last30 - totals.previous30;
   const deltaText = `${delta > 0 ? "+" : ""}${delta}`;
   const weekdays = s("weekdays").split(",");
+  const weekDate = (week: string) => new Intl.DateTimeFormat(DATE_LOCALE[locale], { day: "numeric", month: "short", timeZone: "UTC" }).format(new Date(`${week}T00:00:00Z`));
   const weekLabels = stats.weekly.map((entry) => entry.week);
-  const tickLabels = stats.weekly.map((entry, index) => index % 4 === 0
-    ? new Intl.DateTimeFormat(DATE_LOCALE[locale], { day: "numeric", month: "short", timeZone: "UTC" }).format(new Date(`${entry.week}T00:00:00Z`))
-    : "");
+  const tickLabels = stats.weekly.map((entry, index) => index % 4 === 0 ? weekDate(entry.week) : "");
   const weeklyChart = stackedBarChart({
     labels: weekLabels,
     tickLabels,
@@ -192,11 +270,24 @@ export function buildStatsPage(stats: StatsPayload | null, locale: AppLocale, no
       { key: "planned", label: s("legendPlanned"), values: stats.weekly.map((entry) => entry.planned) }
     ]
   });
-  const legend = `<p class="chart-legend"><span class="chart-key chart-key--unplanned"></span>${escapeHtml(s("legendUnplanned"))}<span class="chart-key chart-key--planned"></span>${escapeHtml(s("legendPlanned"))}</p>`;
+  const legend = `<p class="chart-legend"><span><i class="chart-key chart-key--unplanned"></i>${escapeHtml(s("legendUnplanned"))}</span><span><i class="chart-key chart-key--planned"></i>${escapeHtml(s("legendPlanned"))}</span></p>`;
   const weeklyTable = srTable(s("weeklyTitle"), [s("tableWeek"), s("legendUnplanned"), s("legendPlanned")], stats.weekly.map((entry) => [entry.week, entry.unplanned, entry.planned]));
+  const peakWeek = stats.weekly.reduce<{ week: string; count: number } | null>((best, entry) => {
+    const count = entry.planned + entry.unplanned;
+    return !best || count > best.count ? { week: entry.week, count } : best;
+  }, null);
+  const weeklyTakeaway = peakWeek && peakWeek.count > 0 ? s("weeklyTakeaway", { week: weekDate(peakWeek.week), count: peakWeek.count }) : undefined;
 
+  let heatPeak: { day: number; hour: number; count: number } | null = null;
+  stats.weekdayHour.forEach((row, dayIndex) => row.forEach((count, hour) => {
+    if (!heatPeak || count > heatPeak.count) heatPeak = { day: dayIndex, hour, count };
+  }));
+  const peak = heatPeak as { day: number; hour: number; count: number } | null;
+  const heatTakeaway = stats.weekdayHourN >= 8 && peak && peak.count > 0
+    ? s("heatTakeaway", { weekday: weekdays[peak.day] ?? "", from: String(peak.hour).padStart(2, "0"), to: String((peak.hour + 1) % 24).padStart(2, "0") })
+    : undefined;
   const heat = stats.weekdayHourN >= 8
-    ? heatmapChart({ matrix: stats.weekdayHour, rowLabels: weekdays, title: s("heatTitle") })
+    ? `<div class="dp-chart-scroll dp-chart-scroll--heat">${heatmapChart({ matrix: stats.weekdayHour, rowLabels: weekdays, title: s("heatTitle") })}</div>`
       + srTable(s("heatTitle"), ["", ...Array.from({ length: 24 }, (_, hour) => `${hour}`)], stats.weekdayHour.map((row, index) => [weekdays[index] ?? "", ...row]))
     : `<p class="dp-empty">${escapeHtml(s("noData"))}</p>`;
 
@@ -208,10 +299,10 @@ export function buildStatsPage(stats: StatsPayload | null, locale: AppLocale, no
   const planned = stats.plannedDurationMinutes;
   const unplanned = stats.unplannedDurationMinutes;
   const durationBody = `<div class="dp-grid dp-grid--2">`
-    + `<div><h3 class="dp-sub">${escapeHtml(s("plannedDuration"))}</h3>${planned.n >= 5
+    + `<div><h3 class="dp-sub"><i class="chart-key chart-key--planned"></i>${escapeHtml(s("plannedDuration"))}</h3>${planned.n >= 5
       ? distributionBars({ title: s("plannedDuration"), tone: "planned", buckets: planned.buckets.map((bucket) => ({ label: bucketLabel(bucket.key), count: bucket.count })) })
       : `<p class="dp-empty">${escapeHtml(s("noData"))}</p>`}<p class="dp-note">${escapeHtml(s("plannedDurationNote", { count: planned.n, median: minutesText(planned.median, locale) }))}</p></div>`
-    + `<div><h3 class="dp-sub">${escapeHtml(s("unplannedDuration"))}</h3>${unplanned.n >= 5
+    + `<div><h3 class="dp-sub"><i class="chart-key chart-key--unplanned"></i>${escapeHtml(s("unplannedDuration"))}</h3>${unplanned.n >= 5
       ? distributionBars({ title: s("unplannedDuration"), tone: "unplanned", buckets: unplanned.buckets.map((bucket) => ({ label: bucketLabel(bucket.key), count: bucket.count })) })
       : `<p class="dp-empty">${escapeHtml(s("noData"))}</p>`}<p class="dp-note">${escapeHtml(s("unplannedDurationNote", { exact: unplanned.exact, estimated: unplanned.estimated, median: minutesText(unplanned.median, locale) }))}</p></div>`
     + `</div>`;
@@ -223,14 +314,16 @@ export function buildStatsPage(stats: StatsPayload | null, locale: AppLocale, no
   }).join("");
   const operatorsTable = `<div class="dp-table-wrap"><table class="dp-table"><thead><tr><th scope="col">${escapeHtml(t(locale, "data.common.operator"))}</th><th scope="col">${escapeHtml(t(locale, "data.common.total"))}</th><th scope="col">${escapeHtml(t(locale, "data.common.unplanned"))}</th><th scope="col">${escapeHtml(t(locale, "data.common.planned"))}</th><th scope="col">${escapeHtml(t(locale, "data.common.last30"))}</th><th scope="col">${escapeHtml(s("trend"))}</th></tr></thead><tbody>${operatorRows}</tbody></table></div>`;
 
-  const cantonMax = Math.max(1, ...stats.byCanton.map((entry) => entry.total));
-  const cantonRows = stats.byCanton.filter((entry) => entry.total > 0).map((entry) => {
+  const cantonEntries = stats.byCanton.filter((entry) => entry.total > 0 && cantonByCode(entry.code)).sort((a, b) => b.total - a.total);
+  const cantonMax = Math.max(1, ...cantonEntries.map((entry) => entry.total));
+  const cantonRows = cantonEntries.map((entry) => {
     const canton = cantonByCode(entry.code)!;
     return `<li><a href="${escapeHtml(cantonHref(canton, locale))}"><span class="dp-rank__label">${escapeHtml(canton.names[locale])}</span><span class="dp-rank__track"><span style="width:${((entry.total / cantonMax) * 100).toFixed(1)}%"></span></span><span class="dp-rank__value">${number(entry.total, locale)}</span></a></li>`;
   }).join("");
+  const topCanton = cantonEntries[0] ? cantonByCode(cantonEntries[0].code) : null;
   const share = totals.all ? `${Math.round((totals.withCanton / totals.all) * 100)}%` : "0%";
   const placesList = stats.topPlaces.length
-    ? `<ul class="dp-chips">${stats.topPlaces.map((place) => `<li><a href="${escapeHtml(placeHref(place.slug, locale))}">${escapeHtml(place.name)}<span>${place.count}</span></a></li>`).join("")}</ul>`
+    ? `<ol class="dp-toplist">${stats.topPlaces.map((place) => `<li><a href="${escapeHtml(placeHref(place.slug, locale))}"><span>${escapeHtml(place.name)}</span><b>${place.count}</b></a></li>`).join("")}</ol>`
     : `<p class="dp-empty">${escapeHtml(s("noData"))}</p>`;
 
   const jsonUrl = "/api/public/stats.json";
@@ -239,28 +332,34 @@ export function buildStatsPage(stats: StatsPayload | null, locale: AppLocale, no
     + `<li>${escapeHtml(s("method4"))} <a href="${jsonUrl}">${jsonUrl}</a></li></ul>`
     + `<p class="dp-note">${escapeHtml(t(locale, "data.common.methodNote"))} <a href="${escapeHtml(pathFor({ kind: "about" }, locale))}">${escapeHtml(t(locale, "nav.about"))}</a></p></section>`;
 
+  const unplannedShare = totals.last30 ? Math.round((totals.last30Unplanned / totals.last30) * 100) : null;
   const html = `<article class="dp dp--stats">${trail.html}`
-    + `<header class="dp-head"><h1>${escapeHtml(s("h1"))}</h1>`
-    + `<p class="dp-lede">${escapeHtml(s("lede", { total: number(totals.all, locale), since: day(stats.firstAt, locale), sources: stats.sources.monitored || "–" }))}</p>`
-    + `<p class="dp-meta">${escapeHtml(t(locale, "data.common.asOf", { date: dateTime(stats.generatedAt, locale) }))}</p></header>`
+    + head(s("h1"), s("lede", { total: number(totals.all, locale), since: day(stats.firstAt, locale), sources: stats.sources.monitored || "–" }),
+      escapeHtml(t(locale, "data.common.asOf", { date: dateTime(stats.generatedAt, locale) })))
+    + statusBanner({
+      tone: toneFor(totals.active, totals.upcoming),
+      kicker: t(locale, "data.common.nowKicker"),
+      title: statusTitle(totals, locale, t(locale, "data.common.calmSwiss")),
+      actions: [{ href: pathFor({ kind: "home" }, locale), label: t(locale, "data.common.toRadar"), primary: true }]
+    })
     + `<section class="dp-kpis">`
-    + kpi(s("kpiActive"), number(totals.active, locale), undefined, totals.active ? "active" : undefined)
-    + kpi(s("kpiUpcoming"), number(totals.upcoming, locale), undefined, totals.upcoming ? "upcoming" : undefined)
     + kpi(s("kpi30"), number(totals.last30, locale), s("kpi30Delta", { delta: deltaText }))
-    + kpi(s("kpiMix"), `${number(totals.last30Unplanned, locale)} / ${number(totals.last30Planned, locale)}`)
+    + kpi(s("kpiShareUnplanned"), unplannedShare === null ? "–" : `${unplannedShare}%`, s("kpiShareNote", { planned: number(totals.last30Planned, locale) }))
+    + kpi(s("kpiMedianUnplanned"), minutesText(unplanned.median, locale), s("kpiMedianNote", { count: unplanned.n }))
     + kpi(s("kpiLead"), hoursText(lead.median, locale), s("kpiLeadNote"))
     + `</section>`
-    + card(s("weeklyTitle"), `${weeklyChart}${legend}${weeklyTable}`, s("weeklyNote"))
-    + `<div class="dp-grid dp-grid--2">`
-    + card(s("heatTitle"), heat, s("heatNote", { count: stats.weekdayHourN }))
-    + card(s("leadTitle"), leadBody, s("leadNote", { count: lead.n, median: hoursText(lead.median, locale) }))
-    + `</div>`
+    + card(s("weeklyTitle"), `${legend}<div class="dp-chart-scroll">${weeklyChart}</div>${weeklyTable}`, { note: s("weeklyNote"), takeaway: weeklyTakeaway })
+    + card(s("heatTitle"), heat, { note: s("heatNote", { count: stats.weekdayHourN }), takeaway: heatTakeaway })
     + card(s("durationTitle"), durationBody)
-    + card(s("operatorsTitle"), operatorsTable, s("operatorsNote"))
     + `<div class="dp-grid dp-grid--2">`
-    + card(s("cantonsTitle"), cantonRows ? `<ol class="dp-rank">${cantonRows}</ol>` : `<p class="dp-empty">${escapeHtml(s("noData"))}</p>`, s("cantonsNote", { share }))
+    + card(s("leadTitle"), leadBody, { note: s("leadNote", { count: lead.n, median: hoursText(lead.median, locale) }) })
     + card(s("placesTitle"), placesList)
     + `</div>`
+    + card(s("cantonsTitle"), cantonRows ? `<ol class="dp-rank">${cantonRows}</ol>` : `<p class="dp-empty">${escapeHtml(s("noData"))}</p>`, {
+      note: s("cantonsNote", { share }),
+      takeaway: topCanton ? s("cantonsTakeaway", { canton: topCanton.names[locale], count: cantonEntries[0].total }) : undefined
+    })
+    + card(s("operatorsTitle"), operatorsTable, { note: s("operatorsNote"), className: "dp-card--table" })
     + method
     + `</article>`;
 
@@ -279,6 +378,7 @@ export function buildStatsPage(stats: StatsPayload | null, locale: AppLocale, no
     variableMeasured: ["power outages", "planned interruptions", "duration", "announcement lead time"],
     distribution: [{ "@type": "DataDownload", encodingFormat: "application/json", contentUrl: absoluteUrl(jsonUrl, SITE_ORIGIN) }]
   };
+  void now;
   return {
     locale, route, title, description, robots: INDEXABLE, nav: "stats",
     jsonLd: [trail.jsonLd, dataset],
@@ -287,6 +387,9 @@ export function buildStatsPage(stats: StatsPayload | null, locale: AppLocale, no
 }
 
 // ------------------------------------------------------------ places hub
+
+/** Progressive enhancement: the filter field only appears when this script runs. */
+const PLACE_FILTER_SCRIPT = `<script>(()=>{const input=document.getElementById("place-filter");if(!input)return;const box=input.closest(".dp-finder");if(box)box.hidden=false;const fold=(v)=>v.normalize("NFKD").replace(/[\\u0300-\\u036f]/g,"").toLowerCase();const blocks=[...document.querySelectorAll("[data-place-block]")];const empty=document.getElementById("place-filter-empty");input.addEventListener("input",()=>{const q=fold(input.value.trim());let any=false;for(const block of blocks){let n=0;for(const li of block.querySelectorAll("li[data-name]")){const hit=!q||li.dataset.name.includes(q);li.hidden=!hit;if(hit)n++;}block.hidden=n===0;if(n)any=true;}if(empty)empty.hidden=any;});})();</script>`;
 
 export function buildPlacesHubPage(places: PlacesPayload | null, locale: AppLocale): DataPage {
   const route: AppRoute = { kind: "places" };
@@ -297,20 +400,42 @@ export function buildPlacesHubPage(places: PlacesPayload | null, locale: AppLoca
     const key = entry[2] ?? "";
     byCanton.set(key, [...(byCanton.get(key) ?? []), entry]);
   }
-  const sections = [...SWISS_CANTONS]
+  const byName = (a: PlacesPayload["places"][number], b: PlacesPayload["places"][number]) => a[1].localeCompare(b[1], DATE_LOCALE[locale]);
+  const cantons = [...SWISS_CANTONS]
     .sort((a, b) => a.names[locale].localeCompare(b.names[locale], DATE_LOCALE[locale]))
-    .filter((canton) => byCanton.has(canton.code))
-    .map((canton) => {
-      const entries = [...(byCanton.get(canton.code) ?? [])].sort((a, b) => a[1].localeCompare(b[1], DATE_LOCALE[locale]));
-      return `<section class="dp-card dp-canton-block"><header class="dp-card__head"><h2><a href="${escapeHtml(cantonHref(canton, locale))}">${escapeHtml(canton.names[locale])}</a></h2><p>${escapeHtml(t(locale, "data.common.reports", { count: entries.reduce((sum, entry) => sum + entry[3], 0) }))}</p></header>${placeLinks(entries, locale)}</section>`;
-    }).join("");
+    .filter((canton) => byCanton.has(canton.code));
+  const block = (id: string, heading: string, entries: PlacesPayload["places"]) => {
+    const reports = entries.reduce((sum, entry) => sum + entry[3], 0);
+    return `<section class="dp-card dp-canton-block" id="${escapeHtml(id)}" data-place-block>`
+      + `<header class="dp-card__head dp-card__head--row"><h2>${heading}</h2><p>${escapeHtml(t(locale, "data.common.placesCount", { count: entries.length }))} · ${escapeHtml(t(locale, "data.common.reports", { count: reports }))}</p></header>`
+      + placeLinks([...entries].sort(byName), locale)
+      + `</section>`;
+  };
+  const sections = cantons.map((canton) =>
+    block(`kanton-${canton.code.toLowerCase()}`, `<a href="${escapeHtml(cantonHref(canton, locale))}">${escapeHtml(canton.names[locale])}</a>`, byCanton.get(canton.code) ?? [])
+  ).join("");
   const unknown = byCanton.get("") ?? [];
-  const unknownHtml = unknown.length
-    ? `<section class="dp-card dp-canton-block"><header class="dp-card__head"><h2>${escapeHtml(t(locale, "data.common.unknownCanton"))}</h2></header>${placeLinks([...unknown].sort((a, b) => a[1].localeCompare(b[1], DATE_LOCALE[locale])), locale)}</section>`
+  const unknownHtml = unknown.length ? block("kanton-unbekannt", escapeHtml(t(locale, "data.common.unknownCanton")), unknown) : "";
+  const live = list.filter((entry) => entry[4] > 0).sort(byName);
+  const liveHtml = live.length
+    ? `<section class="dp-card dp-live-places" data-place-block><header class="dp-card__head dp-card__head--row"><h2>${escapeHtml(t(locale, "data.common.liveTitle"))}</h2><span class="dp-count dp-count--upcoming">${live.length}</span></header>${placeLinks(live, locale)}</section>`
     : "";
-  const html = `<article class="dp">${trail.html}<header class="dp-head"><h1>${escapeHtml(t(locale, "data.places.h1"))}</h1>`
-    + `<p class="dp-lede">${escapeHtml(t(locale, "data.places.lede", { places: number(list.length, locale) }))}</p></header>`
-    + `<div class="dp-columns">${sections}${unknownHtml}</div></article>`;
+  const jump = cantons.length
+    ? `<nav class="dp-jump" aria-label="${escapeHtml(t(locale, "data.common.jump"))}">${cantons.map((canton) =>
+      `<a href="#kanton-${escapeHtml(canton.code.toLowerCase())}" title="${escapeHtml(canton.names[locale])}">${escapeHtml(canton.code)}</a>`).join("")}</nav>`
+    : "";
+  const finder = list.length
+    ? `<div class="dp-finder" hidden><label for="place-filter">${escapeHtml(t(locale, "data.common.filterLabel"))}</label><input id="place-filter" type="search" autocomplete="off" enterkeyhint="search" placeholder="${escapeHtml(t(locale, "data.common.filterPlaceholder"))}"></div>`
+    : "";
+  const html = `<article class="dp dp--places">${trail.html}`
+    + head(t(locale, "data.places.h1"), t(locale, "data.places.lede", { places: number(list.length, locale) }))
+    + finder
+    + jump
+    + liveHtml
+    + `<p class="dp-empty dp-filter-empty" id="place-filter-empty" hidden>${escapeHtml(t(locale, "data.common.filterEmpty"))}</p>`
+    + `<div class="dp-columns">${sections}${unknownHtml}</div>`
+    + `</article>`
+    + (list.length ? PLACE_FILTER_SCRIPT : "");
   return {
     locale, route,
     title: t(locale, "data.places.title"),
@@ -340,6 +465,22 @@ export function placeIsIndexable(slice: Pick<PublicSlice, "total" | "lastAt" | "
   return Number.isFinite(last) && now - last <= 90 * 24 * 60 * 60 * 1000;
 }
 
+function sliceFacts(slice: PublicSlice, locale: AppLocale, extra: Array<{ label: string; value: string; note?: string }> = []): string {
+  const rows: Array<{ label: string; value: string; note?: string }> = [
+    { label: t(locale, "data.common.total"), value: number(slice.total, locale), note: t(locale, "data.common.mix", { unplanned: slice.unplanned, planned: slice.planned }) },
+    ...extra,
+    { label: t(locale, "data.common.lastReport"), value: day(slice.lastAt, locale) }
+  ];
+  if (slice.medianDurationMinutes !== null && slice.knownDurations > 0) {
+    rows.splice(rows.length - 1, 0, {
+      label: t(locale, "data.common.medianDuration"),
+      value: minutesText(slice.medianDurationMinutes, locale),
+      note: t(locale, "data.common.medianNote", { count: slice.knownDurations })
+    });
+  }
+  return card(t(locale, "data.common.facts"), factsList(rows), { className: "dp-card--facts" });
+}
+
 export function buildPlacePage(input: PlacePageInput, locale: AppLocale, now = Date.now()): DataPage {
   const route: AppRoute = { kind: "place", slug: input.slug };
   const p = (key: string, options?: Record<string, unknown>) => t(locale, `data.place.${key}`, { place: input.name, ...options });
@@ -362,21 +503,21 @@ export function buildPlacePage(input: PlacePageInput, locale: AppLocale, now = D
     { q: p("faqHow"), a: p("faqHowAnswer", { since, count: slice.total, unplanned: slice.unplanned, planned: slice.planned }) }
   ]);
   const nearby = input.nearby.filter(([slug]) => slug !== input.slug).slice(0, 18);
+  const rows = eventRows(input.items, locale, now);
   const title = clamp(p("title"), 62);
   const html = `<article class="dp dp--place">${trail.html}`
-    + `<header class="dp-head"><p class="dp-live dp-live--${live ? "active" : slice.upcoming ? "upcoming" : "calm"}"><i aria-hidden="true"></i>${escapeHtml(statusLine(slice, locale))}</p>`
-    + `<h1>${escapeHtml(p("h1"))}</h1>`
-    + `<p class="dp-lede">${escapeHtml(p("lede", { count: slice.total, cantonSuffix, since }))}${operators.length ? ` ${escapeHtml(p("ledeOperators", { operators: listJoin(operators, locale) }))}` : ""}</p>`
-    + `<p class="dp-meta">${escapeHtml(t(locale, "data.common.asOf", { date: dateTime(input.generatedAt, locale) }))} · <a href="${escapeHtml(pathFor({ kind: "home" }, locale))}">${escapeHtml(t(locale, "data.common.showOnRadar"))}</a></p></header>`
-    + `<section class="dp-kpis">`
-    + kpi(t(locale, "data.common.total"), number(slice.total, locale))
-    + kpi(t(locale, "data.common.unplanned"), number(slice.unplanned, locale))
-    + kpi(t(locale, "data.common.planned"), number(slice.planned, locale))
-    + kpi(t(locale, "data.common.lastReport"), day(slice.lastAt, locale))
-    + `</section>`
-    + eventLists(input.items, locale, now)
-    + faq.html
+    + head(p("h1"), `${p("lede", { count: slice.total, cantonSuffix, since })}${operators.length ? ` ${p("ledeOperators", { operators: listJoin(operators, locale) })}` : ""}`)
+    + statusBanner({
+      tone: toneFor(slice.active, slice.upcoming),
+      title: statusTitle(slice, locale, t(locale, "data.common.calmIn", { place: input.name })),
+      detail: t(locale, "data.common.asOf", { date: dateTime(input.generatedAt, locale) }),
+      actions: [{ href: radarSearchHref(input.name, locale), label: t(locale, "data.common.showOnRadar") }]
+    })
+    + (rows.current ? listCard(t(locale, "data.common.current"), rows.current, { count: rows.currentCount }) : "")
+    + listCard(t(locale, "data.common.history"), rows.history || `<p class="dp-empty dp-empty--pad">${escapeHtml(t(locale, "data.common.noHistory"))}</p>`, { count: rows.historyCount })
+    + sliceFacts(slice, locale)
     + (nearby.length ? card(canton ? p("nearby", { canton: cantonInText(canton, locale) }) : p("nearbyAll"), placeLinks(nearby, locale)) : "")
+    + faq.html
     + helpCard(locale)
     + `</article>`;
   const placeLd = {
@@ -418,25 +559,25 @@ export function buildCantonPage(input: CantonPageInput, locale: AppLocale, now =
   const c = (key: string, options?: Record<string, unknown>) => t(locale, `data.canton.${key}`, { canton: cantonInText(input.canton, locale), ...options });
   const trail = crumbs(locale, [{ label: t(locale, "data.nav.places"), href: pathFor({ kind: "places" }, locale) }, { label: name }]);
   const slice = input.slice;
-  const live = slice.active > 0;
   const operators = input.operators.length
     ? `<ul class="dp-chips">${input.operators.map((entry) => {
       const profile = operatorBySlug(entry.slug);
       return `<li>${profile ? `<a href="${escapeHtml(operatorProfileUrl(profile, locale))}">` : "<span>"}${escapeHtml(entry.name)}<span>${entry.count}</span>${profile ? "</a>" : "</span>"}</li>`;
     }).join("")}</ul>`
     : "";
+  const rows = eventRows(input.items, locale, now);
   const html = `<article class="dp dp--canton">${trail.html}`
-    + `<header class="dp-head"><p class="dp-live dp-live--${live ? "active" : slice.upcoming ? "upcoming" : "calm"}"><i aria-hidden="true"></i>${escapeHtml(statusLine(slice, locale))}</p>`
-    + `<h1>${escapeHtml(c("h1"))}</h1>`
-    + `<p class="dp-lede">${escapeHtml(c("lede", { count: slice.total, since: day(slice.firstAt, locale) }))}</p>`
-    + `<p class="dp-meta">${escapeHtml(t(locale, "data.common.asOf", { date: dateTime(input.generatedAt, locale) }))} · <a href="${escapeHtml(pathFor({ kind: "stats" }, locale))}">${escapeHtml(t(locale, "data.common.viewStats"))}</a></p></header>`
-    + `<section class="dp-kpis">`
-    + kpi(t(locale, "data.common.total"), number(slice.total, locale))
-    + kpi(t(locale, "data.common.last30"), number(slice.last30Days, locale))
-    + kpi(t(locale, "data.common.unplanned"), number(slice.unplanned, locale))
-    + kpi(t(locale, "data.common.planned"), number(slice.planned, locale))
-    + `</section>`
-    + eventLists(input.items, locale, now)
+    + head(c("h1"), c("lede", { count: slice.total, since: day(slice.firstAt, locale) }),
+      `<a href="${escapeHtml(pathFor({ kind: "stats" }, locale))}">${escapeHtml(t(locale, "data.common.viewStats"))}</a>`)
+    + statusBanner({
+      tone: toneFor(slice.active, slice.upcoming),
+      title: statusTitle(slice, locale, t(locale, "data.common.calmCanton", { canton: cantonInText(input.canton, locale) })),
+      detail: t(locale, "data.common.asOf", { date: dateTime(input.generatedAt, locale) }),
+      actions: [{ href: radarSearchHref(name, locale), label: t(locale, "data.common.showOnRadar") }]
+    })
+    + (rows.current ? listCard(t(locale, "data.common.current"), rows.current, { count: rows.currentCount }) : "")
+    + listCard(t(locale, "data.common.history"), rows.history || `<p class="dp-empty dp-empty--pad">${escapeHtml(t(locale, "data.common.noHistory"))}</p>`, { count: rows.historyCount })
+    + sliceFacts(slice, locale, [{ label: t(locale, "data.common.last30"), value: number(slice.last30Days, locale) }])
     + (input.places.length ? card(c("places"), placeLinks(input.places, locale)) : "")
     + (operators ? card(c("operators"), operators) : "")
     + helpCard(locale)
