@@ -25,6 +25,7 @@ export interface Env {
   BROWSER: BrowserRun;
   SNAPSHOTS: R2Bucket;
   EMAIL: SendEmail;
+  CF_VERSION_METADATA?: WorkerVersionMetadata;
   ALERT_FEED_DE?: string;
   ALERT_FEED_FR?: string;
   ALERT_FEED_IT?: string;

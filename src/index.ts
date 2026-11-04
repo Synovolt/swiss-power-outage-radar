@@ -22,6 +22,7 @@ import { evidenceScreenshotKey } from "./snapshots";
 import { operatorBySlug, resolveOperatorProfile, type OperatorLiveStats } from "./operators";
 import { renderSeoEventAsset } from "./seo-event-page";
 import { renderHomeSeoAsset } from "./seo-home";
+import { edgeCacheKey, forEdgeCache, restoreBrowserCaching } from "./edge-cache";
 import {
   loadOperatorLive,
   operatorSitemapLastmods,
@@ -146,19 +147,25 @@ function renderStatusPage(status: Awaited<ReturnType<typeof getPublicStatus>>): 
 <h2>Letzte Event-Akten</h2><table><thead><tr><th>Zeit</th><th>Ort</th><th>Status</th><th>Quellen</th><th>Confidence</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="6">Keine Event-Akten.</td></tr>`}</tbody></table></main></body></html>`;
 }
 
+/** Bump to drop every cached public response without a deploy. */
 const PUBLIC_CACHE_VERSION = "seo-v10";
 
+/**
+ * Worker version, set on the first request. An isolate only ever runs one
+ * version, so cached HTML never outlives the deploy whose asset hashes it
+ * references (otherwise pages load without CSS/JS until the entry expires).
+ */
+let deployVersion = "dev";
+
 function publicCacheRequest(request: Request): Request {
-  const url = new URL(request.url);
-  url.searchParams.set("__cv", PUBLIC_CACHE_VERSION);
-  return new Request(url.toString(), request);
+  return edgeCacheKey(request, `${PUBLIC_CACHE_VERSION}-${deployVersion}`);
 }
 
 function cachePublic(response: Response, request: Request, ctx: ExecutionContext, cacheControl: string): Response {
-  const cached = new Response(response.body, response);
-  cached.headers.set("Cache-Control", cacheControl);
-  if (response.ok) ctx.waitUntil(caches.default.put(publicCacheRequest(request), cached.clone()));
-  return cached;
+  const fresh = new Response(response.body, response);
+  fresh.headers.set("Cache-Control", cacheControl);
+  if (response.ok) ctx.waitUntil(caches.default.put(publicCacheRequest(request), forEdgeCache(fresh.clone())));
+  return fresh;
 }
 
 const CACHE = {
@@ -221,6 +228,7 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const forcedHttps = httpsRedirect(request);
     if (forcedHttps) return forcedHttps;
+    if (env.CF_VERSION_METADATA?.id) deployVersion = env.CF_VERSION_METADATA.id;
 
     const url = new URL(request.url);
     const publicOrigin = siteOriginFromRequest(request);
@@ -235,7 +243,7 @@ export default {
 
     if (request.method === "GET" && isCacheablePublicPath(url.pathname)) {
       const cached = await caches.default.match(publicCacheRequest(request));
-      if (cached) return cached;
+      if (cached) return restoreBrowserCaching(cached);
     }
 
     // Legacy /events/:id links → canonical event URL.
