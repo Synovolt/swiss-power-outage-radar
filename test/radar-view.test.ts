@@ -191,7 +191,12 @@ describe("groupItems", () => {
       ["next7", de.groups.next7],
       ["recent", de.groups.recent]
     ]);
-    expect(groupItems(items, "now", NOW, de, true)).toEqual([{ key: "results", label: "Treffer", items }]);
+    // Search results keep the radar's reading order: grouped by state.
+    expect(groupItems(items, "now", NOW, de, true).map((group) => [group.key, group.label, group.items.map((entry) => entry.id)])).toEqual([
+      ["active", "Aktiv", [1]],
+      ["upcoming", "Geplant", [2]],
+      ["ended", "Beendet", [3]]
+    ]);
     expect(groupItems([], "now", NOW, de, true)).toEqual([]);
   });
 });

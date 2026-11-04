@@ -13,7 +13,7 @@ const { class: className, ...rest } = Astro.props;
 <style>
   .app-list {
     overflow: hidden;
-    border-radius: var(--radius);
+    border-radius: calc(var(--radius) + 4px);
     border: 1px solid var(--hairline);
     background: var(--surface);
   }

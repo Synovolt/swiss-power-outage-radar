@@ -35,7 +35,34 @@ export const dataDe = {
     since: "seit {{date}}",
     home: "Stromausfälle Schweiz",
     whatToDo: "Was tun bei einem Stromausfall?",
-    whatToDoText: "Sicherungen prüfen, Nachbarn fragen und die Störung dem Netzbetreiber melden. Bei Gefahr für Leib und Leben: Notruf 112."
+    whatToDoText: "Sicherungen prüfen, Nachbarn fragen und die Störung dem Netzbetreiber melden. Bei Gefahr für Leib und Leben: Notruf 112.",
+    calmIn: "Zurzeit keine Störung in {{place}}",
+    calmCanton: "Zurzeit keine Störung im Kanton {{canton}}",
+    calmSwiss: "Zurzeit keine Störung gemeldet",
+    nowKicker: "Jetzt",
+    toRadar: "Zum Radar",
+    facts: "In Zahlen",
+    mix: "{{unplanned}} ungeplant · {{planned}} geplant",
+    medianDuration: "Typische Dauer",
+    medianNote: "Median aus {{count}} Ereignissen mit belegtem Ende",
+    filterLabel: "Ort finden",
+    filterPlaceholder: "Ortsname eingeben …",
+    filterEmpty: "Kein Ort gefunden. Fehlt Ihr Ort, gibt es dort bisher keine öffentliche Meldung.",
+    liveTitle: "Orte mit aktueller oder geplanter Meldung",
+    jump: "Zu Kanton springen",
+    placesCount_one: "{{count}} Ort",
+    placesCount_other: "{{count}} Orte",
+    latest: "Neueste Meldungen",
+    official: "Offizielle Störungsseite",
+    allOperatorReports: "Alle Meldungen von {{name}} auf dem Radar",
+    operatorCalm: "Zurzeit keine aktive Störung von {{name}} im Radar",
+    operatorsLive_one: "{{count}} Betreiber mit aktueller Meldung",
+    operatorsLive_other: "{{count}} Betreiber mit aktueller Meldung",
+    activeShort: "{{count}} aktiv",
+    upcomingShort: "{{count}} geplant",
+    reportsShort_one: "{{count}} Meldung",
+    reportsShort_other: "{{count}} Meldungen",
+    noReports: "noch keine Meldung"
   },
   radar: {
     views: { now: "Aktuell", planned: "Geplant", history: "Verlauf" },
@@ -135,7 +162,14 @@ export const dataDe = {
       gt4h: "über 4 h"
     },
     hours: "{{value}} h",
-    days: "{{value}} Tage"
+    days: "{{value}} Tage",
+    kpiShareUnplanned: "Davon ungeplant",
+    kpiShareNote: "{{planned}} geplante Unterbrüche",
+    kpiMedianUnplanned: "Typische Dauer ungeplant",
+    kpiMedianNote: "Median, {{count}} Ausfälle",
+    weeklyTakeaway: "Stärkste Woche: ab {{week}} mit {{count}} Meldungen.",
+    heatTakeaway: "Am häufigsten: {{weekday}} zwischen {{from}} und {{to}} Uhr.",
+    cantonsTakeaway: "Die meisten Meldungen: {{canton}} ({{count}})."
   },
   place: {
     title: "Stromausfall {{place}}: aktuell & alle Meldungen",
@@ -206,7 +240,34 @@ export const dataFr: DataCatalog = {
     since: "depuis le {{date}}",
     home: "Pannes de courant en Suisse",
     whatToDo: "Que faire en cas de panne de courant ?",
-    whatToDoText: "Vérifiez les fusibles, demandez aux voisins et signalez la panne au gestionnaire de réseau. En cas de danger : appelez le 112."
+    whatToDoText: "Vérifiez les fusibles, demandez aux voisins et signalez la panne au gestionnaire de réseau. En cas de danger : appelez le 112.",
+    calmIn: "Aucune panne actuellement à {{place}}",
+    calmCanton: "Aucune panne actuellement dans le canton {{canton}}",
+    calmSwiss: "Aucune panne signalée actuellement",
+    nowKicker: "Maintenant",
+    toRadar: "Vers le radar",
+    facts: "En chiffres",
+    mix: "{{unplanned}} non planifiées · {{planned}} planifiées",
+    medianDuration: "Durée typique",
+    medianNote: "Médiane de {{count}} événements avec fin établie",
+    filterLabel: "Trouver un lieu",
+    filterPlaceholder: "Saisir un nom de lieu …",
+    filterEmpty: "Aucun lieu trouvé. Si votre lieu manque, aucun signalement public n'y existe encore.",
+    liveTitle: "Lieux avec un signalement actuel ou planifié",
+    jump: "Aller au canton",
+    placesCount_one: "{{count}} lieu",
+    placesCount_other: "{{count}} lieux",
+    latest: "Derniers signalements",
+    official: "Page officielle des pannes",
+    allOperatorReports: "Tous les signalements de {{name}} sur le radar",
+    operatorCalm: "Aucune panne en cours de {{name}} sur le radar",
+    operatorsLive_one: "{{count}} gestionnaire avec signalement actuel",
+    operatorsLive_other: "{{count}} gestionnaires avec signalement actuel",
+    activeShort: "{{count}} en cours",
+    upcomingShort: "{{count}} planifiée(s)",
+    reportsShort_one: "{{count}} signalement",
+    reportsShort_other: "{{count}} signalements",
+    noReports: "aucun signalement"
   },
   radar: {
     views: { now: "En cours", planned: "Planifiées", history: "Historique" },
@@ -306,7 +367,14 @@ export const dataFr: DataCatalog = {
       gt4h: "plus de 4 h"
     },
     hours: "{{value}} h",
-    days: "{{value}} jours"
+    days: "{{value}} jours",
+    kpiShareUnplanned: "Dont non planifiées",
+    kpiShareNote: "{{planned}} coupures planifiées",
+    kpiMedianUnplanned: "Durée typique non planifiée",
+    kpiMedianNote: "Médiane, {{count}} pannes",
+    weeklyTakeaway: "Semaine la plus chargée : dès le {{week}} avec {{count}} signalements.",
+    heatTakeaway: "Le plus fréquent : {{weekday}} entre {{from}} h et {{to}} h.",
+    cantonsTakeaway: "Le plus de signalements : {{canton}} ({{count}})."
   },
   place: {
     title: "Panne de courant {{place}} : en cours et historique",
@@ -375,7 +443,34 @@ export const dataIt: DataCatalog = {
     since: "dal {{date}}",
     home: "Interruzioni di corrente in Svizzera",
     whatToDo: "Cosa fare in caso di blackout?",
-    whatToDoText: "Controllare i fusibili, chiedere ai vicini e segnalare il guasto al gestore di rete. In caso di pericolo: chiamare il 112."
+    whatToDoText: "Controllare i fusibili, chiedere ai vicini e segnalare il guasto al gestore di rete. In caso di pericolo: chiamare il 112.",
+    calmIn: "Al momento nessun guasto a {{place}}",
+    calmCanton: "Al momento nessun guasto nel cantone {{canton}}",
+    calmSwiss: "Al momento nessun guasto segnalato",
+    nowKicker: "Ora",
+    toRadar: "Al radar",
+    facts: "In cifre",
+    mix: "{{unplanned}} non pianificate · {{planned}} pianificate",
+    medianDuration: "Durata tipica",
+    medianNote: "Mediana di {{count}} eventi con fine documentata",
+    filterLabel: "Trova località",
+    filterPlaceholder: "Inserire una località …",
+    filterEmpty: "Nessuna località trovata. Se manca la vostra, non vi è ancora alcuna segnalazione pubblica.",
+    liveTitle: "Località con segnalazione attuale o pianificata",
+    jump: "Vai al cantone",
+    placesCount_one: "{{count}} località",
+    placesCount_other: "{{count}} località",
+    latest: "Ultime segnalazioni",
+    official: "Pagina ufficiale dei guasti",
+    allOperatorReports: "Tutte le segnalazioni di {{name}} sul radar",
+    operatorCalm: "Al momento nessun guasto attivo di {{name}} sul radar",
+    operatorsLive_one: "{{count}} gestore con segnalazione attuale",
+    operatorsLive_other: "{{count}} gestori con segnalazione attuale",
+    activeShort: "{{count}} in corso",
+    upcomingShort: "{{count}} pianificate",
+    reportsShort_one: "{{count}} segnalazione",
+    reportsShort_other: "{{count}} segnalazioni",
+    noReports: "nessuna segnalazione"
   },
   radar: {
     views: { now: "In corso", planned: "Programmate", history: "Cronologia" },
@@ -475,7 +570,14 @@ export const dataIt: DataCatalog = {
       gt4h: "oltre 4 h"
     },
     hours: "{{value}} h",
-    days: "{{value}} giorni"
+    days: "{{value}} giorni",
+    kpiShareUnplanned: "Di cui non pianificate",
+    kpiShareNote: "{{planned}} interruzioni pianificate",
+    kpiMedianUnplanned: "Durata tipica non pianificata",
+    kpiMedianNote: "Mediana, {{count}} guasti",
+    weeklyTakeaway: "Settimana più intensa: dal {{week}} con {{count}} segnalazioni.",
+    heatTakeaway: "Più frequente: {{weekday}} tra le {{from}} e le {{to}}.",
+    cantonsTakeaway: "Più segnalazioni: {{canton}} ({{count}})."
   },
   place: {
     title: "Interruzione di corrente {{place}}: in corso e cronologia",
@@ -544,7 +646,34 @@ export const dataEn: DataCatalog = {
     since: "since {{date}}",
     home: "Power outages Switzerland",
     whatToDo: "What to do in a power outage?",
-    whatToDoText: "Check your fuses, ask your neighbours and report the outage to the grid operator. If life is at risk, call 112."
+    whatToDoText: "Check your fuses, ask your neighbours and report the outage to the grid operator. If life is at risk, call 112.",
+    calmIn: "No outage in {{place}} right now",
+    calmCanton: "No outage in the canton of {{canton}} right now",
+    calmSwiss: "No outage reported right now",
+    nowKicker: "Now",
+    toRadar: "Open radar",
+    facts: "In numbers",
+    mix: "{{unplanned}} unplanned · {{planned}} planned",
+    medianDuration: "Typical duration",
+    medianNote: "Median of {{count}} events with a known end",
+    filterLabel: "Find a place",
+    filterPlaceholder: "Type a place name …",
+    filterEmpty: "No place found. If yours is missing, there is no public report for it yet.",
+    liveTitle: "Places with a current or planned report",
+    jump: "Jump to canton",
+    placesCount_one: "{{count}} place",
+    placesCount_other: "{{count}} places",
+    latest: "Latest reports",
+    official: "Official outage page",
+    allOperatorReports: "All {{name}} reports on the radar",
+    operatorCalm: "No ongoing {{name}} outage on the radar right now",
+    operatorsLive_one: "{{count}} operator with a current report",
+    operatorsLive_other: "{{count}} operators with a current report",
+    activeShort: "{{count}} ongoing",
+    upcomingShort: "{{count}} planned",
+    reportsShort_one: "{{count}} report",
+    reportsShort_other: "{{count}} reports",
+    noReports: "no reports yet"
   },
   radar: {
     views: { now: "Now", planned: "Planned", history: "History" },
@@ -644,7 +773,14 @@ export const dataEn: DataCatalog = {
       gt4h: "over 4 h"
     },
     hours: "{{value}} h",
-    days: "{{value}} days"
+    days: "{{value}} days",
+    kpiShareUnplanned: "Of which unplanned",
+    kpiShareNote: "{{planned}} planned interruptions",
+    kpiMedianUnplanned: "Typical unplanned duration",
+    kpiMedianNote: "Median, {{count}} outages",
+    weeklyTakeaway: "Busiest week: from {{week}} with {{count}} reports.",
+    heatTakeaway: "Most frequent: {{weekday}} between {{from}}:00 and {{to}}:00.",
+    cantonsTakeaway: "Most reports: {{canton}} ({{count}})."
   },
   place: {
     title: "Power outage {{place}}: live status & history",

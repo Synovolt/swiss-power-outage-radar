@@ -40,7 +40,14 @@ export interface RadarCopy {
   views: Record<RadarView, string>;
   natureAll: string;
   groups: Record<"active" | "next7" | "recent" | "today" | "tomorrow" | "results" | "later", string>;
-  time: { since: string; reported: string; endedAt: string; window: string; lasted: string };
+  time: { since: string; reported: string; endedAt: string; window: string; lasted: string; until: string };
+  /** Short state words for rows and pins: Aktiv · Geplant · Beendet. */
+  state: { active: string; upcoming: string; ended: string };
+  /** Kind of event as a noun: "Stromausfall" / "Geplanter Unterbruch". */
+  kind: { planned: string; unplanned: string };
+  /** Labels next to the live counters on the home page (singular/plural). */
+  tiles: { activeOne: string; activeOther: string; plannedOne: string; plannedOther: string };
+  historyLink: string;
   countOne: string;
   countOther: string;
   empty: Record<RadarView | "query", string>;
@@ -192,10 +199,21 @@ export interface RadarGroup {
   key: string;
   label: string;
   items: RadarItem[];
+  /** Set when the group was shortened: the full count and where the rest lives. */
+  total?: number;
+  moreView?: RadarView;
+}
+
+/** The "now" view keeps recently ended events short; the rest is one tap away in the history. */
+export const RECENT_LIMIT = 6;
+
+export function limitRecent(groups: RadarGroup[], limit = RECENT_LIMIT): RadarGroup[] {
+  return groups.map((group) => group.key === "recent" && group.items.length > limit
+    ? { ...group, items: group.items.slice(0, limit), total: group.items.length, moreView: "history" as const }
+    : group);
 }
 
 export function groupItems(items: RadarItem[], view: RadarView, now: number, copy: RadarCopy, searching = false): RadarGroup[] {
-  if (searching) return items.length ? [{ key: "results", label: copy.groups.results, items }] : [];
   const groups = new Map<string, RadarGroup>();
   const push = (key: string, label: string, item: RadarItem) => {
     const group = groups.get(key) ?? { key, label, items: [] };
@@ -211,7 +229,12 @@ export function groupItems(items: RadarItem[], view: RadarView, now: number, cop
     return dateFormat(copy.dateLocale, { weekday: "long", day: "numeric", month: "long" }).format(new Date(ms));
   };
   for (const item of items) {
-    if (view === "now") {
+    if (searching) {
+      // Search results keep the same reading order as the radar: state first.
+      if (item.status === "active") push("active", copy.state.active, item);
+      else if (item.status === "upcoming") push("upcoming", copy.state.upcoming, item);
+      else push("ended", copy.state.ended, item);
+    } else if (view === "now") {
       if (item.status === "active") push("active", copy.groups.active, item);
       else if (item.status === "upcoming") push("next7", copy.groups.next7, item);
       else push("recent", copy.groups.recent, item);
@@ -305,24 +328,71 @@ function shortLocation(value: string): string {
   return value.split(",")[0]?.trim() || value;
 }
 
-function iconSvg(item: RadarItem): string {
-  return item.nature === "planned"
-    ? `<svg class="radar-item__icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="10" height="10" rx="2.5"/></svg>`
-    : `<svg class="radar-item__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.6 14 13H2z"/></svg>`;
+function capitalize(value: string): string {
+  return value ? value.charAt(0).toLocaleUpperCase() + value.slice(1) : value;
+}
+
+/** "Heute", "Morgen", "Gestern" or "Do., 5. Nov." in the Zurich calendar. */
+export function dayWord(ms: number, now: number, copy: RadarCopy): string {
+  const diff = Math.round((Date.parse(`${dayKey(ms)}T00:00:00Z`) - Date.parse(`${dayKey(now)}T00:00:00Z`)) / DAY_MS);
+  if (Math.abs(diff) <= 1) {
+    const key = `${copy.dateLocale}|auto`;
+    let rtf = relativeCache.get(key);
+    if (!rtf) {
+      rtf = new Intl.RelativeTimeFormat(copy.dateLocale, { numeric: "auto" });
+      relativeCache.set(key, rtf);
+    }
+    return capitalize(rtf.format(diff, "day"));
+  }
+  return formatDay(ms, copy, now);
+}
+
+/** Two short lines that answer "when?" for a row: a headline and a detail. */
+export function whenLines(item: RadarItem, now: number, copy: RadarCopy): [string, string] {
+  const start = item.startMs;
+  if (item.status === "upcoming") {
+    const at = start ?? item.sortMs;
+    const end = item.plannedEndMs;
+    if (end && end > at) {
+      const endText = dayKey(end) === dayKey(at) ? formatTime(end, copy) : `${dayWord(end, now, copy)} ${formatTime(end, copy)}`;
+      return [dayWord(at, now, copy), `${formatTime(at, copy)}–${endText}`];
+    }
+    return [dayWord(at, now, copy), formatTime(at, copy)];
+  }
+  if (item.status === "active") {
+    const head = start && start <= now
+      ? copy.time.since.replace("{{relative}}", durationOnly(start, now))
+      : copy.time.reported.replace("{{relative}}", relativeTime(item.sortMs, now, copy));
+    const end = item.plannedEndMs;
+    const until = end && end > now
+      ? copy.time.until.replace("{{time}}", dayKey(end) === dayKey(now) ? formatTime(end, copy) : `${dayWord(end, now, copy)} ${formatTime(end, copy)}`)
+      : "";
+    return [head, until];
+  }
+  const end = item.endMs;
+  const when = end ?? start ?? item.sortMs;
+  const lasted = start && end && end > start ? ` · ${formatDuration((end - start) / 60000)}` : "";
+  return [`${dayWord(when, now, copy)}, ${formatTime(when, copy)}`, `${copy.state.ended}${lasted}`];
+}
+
+export function stateWord(status: string, copy: RadarCopy): string {
+  if (status === "active") return copy.state.active;
+  if (status === "upcoming") return copy.state.upcoming;
+  return copy.state.ended;
 }
 
 export function rowHtml(item: RadarItem, now: number, copy: RadarCopy, selected = false): string {
   const tone = toneOf(item.status);
-  const status = copy.status[item.status === "stale_unconfirmed" ? "stale" : item.status] ?? copy.status.unknown ?? item.status;
-  const nature = copy.nature[item.nature] ?? copy.nature.unknown ?? "";
+  const kind = item.nature === "planned" ? copy.kind.planned : copy.kind.unplanned;
   const extra = item.location.includes(",") ? item.location.split(",").slice(1).join(",").trim() : "";
+  const [head, detail] = whenLines(item, now, copy);
   return `<a class="radar-item radar-item--${tone}${selected ? " is-selected" : ""}" href="${escapeHtml(eventHref(item, copy))}" data-id="${item.id}"${selected ? ' aria-current="true"' : ""}>`
-    + `<span class="radar-item__mark">${iconSvg(item)}</span>`
-    + `<span class="radar-item__main"><span class="radar-item__title">${escapeHtml(shortLocation(item.location))}`
+    + `<span class="radar-item__mark" aria-hidden="true"></span>`
+    + `<span class="radar-item__main"><span class="radar-item__title"><span class="radar-item__name">${escapeHtml(shortLocation(item.location))}</span>`
     + `${item.canton ? `<span class="radar-item__canton">${escapeHtml(item.canton)}</span>` : ""}</span>`
-    + `<span class="radar-item__meta">${escapeHtml(nature)}${item.publisher ? ` · ${escapeHtml(item.publisher)}` : ""}${extra ? ` · ${escapeHtml(extra)}` : ""}</span></span>`
-    + `<span class="radar-item__side"><span class="radar-item__status">${escapeHtml(status)}</span>`
-    + `<time class="radar-item__time">${escapeHtml(timeLabel(item, now, copy))}</time></span>`
+    + `<span class="radar-item__meta"><span class="sr-only">${escapeHtml(stateWord(item.status, copy))} · </span>${escapeHtml(kind)}${item.publisher ? ` · ${escapeHtml(item.publisher)}` : ""}${extra ? ` · ${escapeHtml(extra)}` : ""}</span></span>`
+    + `<span class="radar-item__side"><span class="radar-item__when">${escapeHtml(head)}</span>`
+    + `${detail ? `<span class="radar-item__detail">${escapeHtml(detail)}</span>` : ""}</span>`
     + `</a>`;
 }
 
@@ -333,8 +403,9 @@ export function countLabel(count: number, copy: RadarCopy): string {
 export function groupsHtml(groups: RadarGroup[], now: number, copy: RadarCopy, selectedId: number | null = null): string {
   return groups.map((group) =>
     `<section class="radar-group" data-group="${escapeHtml(group.key)}">`
-    + `<h3 class="radar-group__head"><span>${escapeHtml(group.label)}</span><span class="radar-group__n">${group.items.length}</span></h3>`
+    + `<h3 class="radar-group__head"><span>${escapeHtml(group.label)}</span><span class="radar-group__n">${group.total ?? group.items.length}</span></h3>`
     + group.items.map((item) => rowHtml(item, now, copy, item.id === selectedId)).join("")
+    + (group.moreView ? `<button type="button" class="radar-group__more" data-go-view="${group.moreView}">${escapeHtml(copy.historyLink)}</button>` : "")
     + `</section>`
   ).join("");
 }

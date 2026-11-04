@@ -1,13 +1,13 @@
 ---
 /**
- * Radar home: desktop = split map | list (viewport-locked), mobile = map HUD + drawer.
- * The Worker (src/seo-home.ts) fills #radar-list with server-rendered rows and
- * #radar-index with the compact public index; this script then takes over with
- * instant search and filtering over the full index (src/radar-view.ts).
+ * Radar home. Answer first: live counters and a place search, then the list.
+ * Desktop (≥ 960px): a scrolling side column (intro, filters, list) next to a
+ * full-height map. Mobile: one scrolling page (intro, map, sticky filters, list).
+ * The Worker (src/seo-home.ts) fills #radar-list, the counters and #radar-index;
+ * the script below then searches and filters over the full public index.
  */
 import maplibreCss from "maplibre-gl/dist/maplibre-gl.css?url";
 import RadarLayout from "../../layouts/RadarLayout.astro";
-import AppLangSwitch from "@/components/app/AppLangSwitch.astro";
 import "../../styles/radar-items.css";
 import { homeJsonLd } from "../../seo-site";
 import { renderHomeAbout } from "../../seo-home";
@@ -20,12 +20,10 @@ import {
   type AppLocale
 } from "../../i18n";
 import { SITE_ORIGIN, absoluteUrl } from "../../public-url";
-import { Button } from "@/components/starwind/button";
-import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/starwind/input-group";
 import Search from "@tabler/icons/outline/search.svg";
 import X from "@tabler/icons/outline/x.svg";
-import List from "@tabler/icons/outline/list.svg";
 import Refresh from "@tabler/icons/outline/refresh.svg";
+import ChevronDown from "@tabler/icons/outline/chevron-down.svg";
 
 export function getStaticPaths() {
   return localeStaticPaths();
@@ -37,6 +35,7 @@ const locale: AppLocale = Astro.props.locale ?? localeFromParam(
 const homePath = pathFor({ kind: "home" }, locale);
 const copy = radarViewCopy(locale);
 const views = ["now", "planned", "history"] as const;
+const u = (key: string, options?: Record<string, unknown>) => t(locale, `ui.home.${key}`, options);
 ---
 
 <RadarLayout
@@ -57,95 +56,91 @@ const views = ["now", "planned", "history"] as const;
 
   <section class="radar" data-radar>
     <div class="radar__map-wrap" data-loading-label={t(locale, "event.mapLoading")}>
-      <div id="radar-map" class="radar__map" role="img" aria-label={t(locale, "home.mapAria")}></div>
+      <div id="radar-map" class="radar__map" role="region" aria-label={t(locale, "home.mapAria")}></div>
       <div class="radar__legend" aria-hidden="true">
-        <span><i class="legend-shape legend-shape--triangle"></i>{t(locale, "home.legendUnplanned")}</span>
-        <span><i class="legend-shape legend-shape--square"></i>{t(locale, "home.legendPlanned")}</span>
-        <span><i class="legend-dot" data-tone="active"></i>{t(locale, "home.legendActive")}</span>
-        <span><i class="legend-dot" data-tone="upcoming"></i>{t(locale, "home.legendUpcoming")}</span>
-        <span><i class="legend-dot" data-tone="resolved"></i>{t(locale, "home.legendResolved")}</span>
+        <span><i data-tone="active"></i>{u("legendActive")}</span>
+        <span><i data-tone="upcoming"></i>{u("legendPlanned")}</span>
+        <span><i data-tone="ended"></i>{u("legendEnded")}</span>
       </div>
-      <p class="radar__disclaimer">{t(locale, "home.disclaimer")}</p>
     </div>
+    <div class="radar__side" id="radar-scroll">
+      <header class="radar__intro">
+        <div class="radar__meta">
+          <span class="live-chip"><i aria-hidden="true"></i>{u("eyebrow")}</span>
+          <span class="radar__updated">
+            <span id="radar-note">{t(locale, "home.loading")}</span>
+            <button type="button" id="radar-refresh" class="icon-btn" aria-label={t(locale, "home.refresh")} title={t(locale, "home.refresh")}>
+              <Refresh aria-hidden="true" />
+            </button>
+          </span>
+        </div>
+        <h1 id="radar-title" class="radar__h1">{t(locale, "data.home.h1")}</h1>
 
-    <header class="radar__hud">
-      <div class="radar__hud-bar">
-        <a class="radar__brand" href={homePath} aria-label="outage.ch Radar">outage.ch</a>
-        <InputGroup class="radar__search min-w-0">
-          <InputGroupAddon>
-            <Search class="size-4" aria-hidden="true" />
-          </InputGroupAddon>
-          <label class="sr-only" for="radar-search">{t(locale, "home.searchLabel")}</label>
-          <InputGroupInput
-            id="radar-search"
-            type="search"
-            placeholder={t(locale, "data.radar.searchHint")}
-            autocomplete="off"
-            enterkeyhint="search"
-            aria-keyshortcuts="/"
-          />
-          <kbd class="radar__kbd" aria-hidden="true">/</kbd>
-        </InputGroup>
-        <AppLangSwitch locale={locale} class="app-langs--hud" />
-      </div>
-      <div class="radar__filters">
-        <div class="radar__views" role="group" aria-label={t(locale, "data.radar.viewsAria")}>
+        <div class="pulse" data-live>
+          <button type="button" class="pulse__line pulse__line--active" data-go-view="now">
+            <span class="pulse__n" data-live-count="active">–</span>
+            <span class="pulse__label" data-live-label="active">{copy.tiles.activeOther}</span>
+          </button>
+          <button type="button" class="pulse__line pulse__line--upcoming" data-go-view="planned">
+            <span class="pulse__n" data-live-count="upcoming">–</span>
+            <span class="pulse__label" data-live-label="upcoming">{copy.tiles.plannedOther}</span>
+            <span class="pulse__hint">{u("plannedHint")}</span>
+          </button>
+        </div>
+
+        <form class="radar__search" role="search" action={homePath} method="get">
+          <label class="radar__search-label" for="radar-search">{u("question")}</label>
+          <div class="search-field">
+            <Search class="search-field__icon" aria-hidden="true" />
+            <input
+              id="radar-search"
+              name="q"
+              type="search"
+              placeholder={u("searchPlaceholder")}
+              autocomplete="off"
+              spellcheck="false"
+              enterkeyhint="search"
+              aria-keyshortcuts="/"
+              aria-controls="radar-list"
+            />
+            <kbd class="search-field__kbd" aria-hidden="true">/</kbd>
+            <button type="button" id="radar-search-clear" class="icon-btn search-field__clear" aria-label={u("searchClear")} hidden>
+              <X aria-hidden="true" />
+            </button>
+          </div>
+        </form>
+      </header>
+
+      <div class="radar__toolbar">
+        <div class="seg" role="group" aria-label={t(locale, "data.radar.viewsAria")}>
           {views.map((view) => (
-            <button type="button" class="radar-view" data-view={view} aria-pressed={view === "now" ? "true" : "false"}>
-              {copy.views[view]}<span class="radar-view__n" data-view-count={view}>–</span>
+            <button type="button" class="seg__btn" data-view={view} aria-pressed={view === "now" ? "true" : "false"}>
+              {copy.views[view]}
             </button>
           ))}
         </div>
-        <div class="radar__nature" role="group" aria-label={t(locale, "home.filterNature")}>
-          <button type="button" class="radar-toggle" data-nature="" aria-pressed="true">{copy.natureAll}</button>
-          <button type="button" class="radar-toggle" data-nature="unplanned" aria-pressed="false"><i class="legend-shape legend-shape--triangle" aria-hidden="true"></i>{copy.nature.unplanned}</button>
-          <button type="button" class="radar-toggle" data-nature="planned" aria-pressed="false"><i class="legend-shape legend-shape--square" aria-hidden="true"></i>{copy.nature.planned}</button>
-        </div>
+        <label class="select-pill">
+          <span class="sr-only">{u("natureLabel")}</span>
+          <select id="radar-nature">
+            <option value="">{copy.natureAll}</option>
+            <option value="unplanned">{copy.nature.unplanned}</option>
+            <option value="planned">{copy.nature.planned}</option>
+          </select>
+          <ChevronDown class="select-pill__icon" aria-hidden="true" />
+        </label>
       </div>
-    </header>
 
-    <aside class="radar__panel" id="radar-panel" aria-labelledby="radar-title">
-      <div class="radar__handle" aria-hidden="true"></div>
-      <div class="radar__panel-head">
-        <div class="min-w-0">
-          <h1 id="radar-title">{t(locale, "data.home.h1")}</h1>
-          <p id="radar-count" class="radar__count" aria-live="polite">{t(locale, "home.loading")}</p>
-        </div>
-        <div class="radar__panel-actions">
-          <Button type="button" id="radar-refresh" variant="ghost" size="icon-sm" aria-label={t(locale, "home.refresh")} title={t(locale, "home.refresh")}>
-            <Refresh class="size-4" aria-hidden="true" />
-          </Button>
-          <Button type="button" id="radar-panel-close" variant="ghost" size="sm" class="radar__panel-close" aria-label={t(locale, "home.closeList")}>{t(locale, "home.close")}</Button>
-        </div>
+      <p id="radar-count" class="sr-only" aria-live="polite"></p>
+      <div id="radar-list" class="radar__list" aria-busy="true" aria-labelledby="radar-title">
+        <div class="radar-skel"></div><div class="radar-skel"></div><div class="radar-skel"></div>
       </div>
-      <div class="radar__scroll" id="radar-scroll">
-        <div id="radar-list" class="radar__list" aria-busy="true">
-          <div class="radar-skel"></div><div class="radar-skel"></div><div class="radar-skel"></div>
-        </div>
-        <div class="radar__more-wrap">
-          <Button type="button" id="radar-more" variant="outline" size="sm" class="w-full" hidden>{t(locale, "home.loadMore")}</Button>
-        </div>
-        <Fragment set:html={renderHomeAbout(locale)} />
+      <div class="radar__more-wrap">
+        <button type="button" id="radar-more" class="btn-quiet" hidden>{t(locale, "home.loadMore")}</button>
       </div>
-      <div class="radar__panel-foot">
-        <p id="radar-note" class="radar__note">{t(locale, "home.loading")}</p>
-        <p class="radar__foot-disclaimer">{t(locale, "home.disclaimer")}</p>
-      </div>
-    </aside>
-
-    <div id="radar-sheet" class="radar__sheet" hidden>
-      <Button type="button" id="radar-sheet-close" variant="ghost" size="icon-sm" class="radar__sheet-x" aria-label={t(locale, "home.closePreview")}>
-        <X class="size-4" />
-      </Button>
-      <div id="radar-sheet-body"></div>
-      <Button as="a" id="radar-sheet-link" href="#" class="mt-3 w-full">{t(locale, "home.openReport")}</Button>
+      <Fragment set:html={renderHomeAbout(locale)} />
+      <p class="radar__disclaimer">{t(locale, "home.disclaimer")}</p>
     </div>
 
-    <Button type="button" id="radar-list-fab" class="radar__fab" aria-controls="radar-panel">
-      <List class="size-[1.05rem]" aria-hidden="true" />
-      {t(locale, "home.reports")}
-      <b id="radar-fab-count">–</b>
-    </Button>
   </section>
 
   <script>
@@ -157,6 +152,7 @@ const views = ["now", "planned", "history"] as const;
       groupItems,
       groupsHtml,
       inView,
+      limitRecent,
       matchesNature,
       matchesQuery,
       rowHtml,
@@ -174,6 +170,7 @@ const views = ["now", "planned", "history"] as const;
     const VIEWS: RadarView[] = ["now", "planned", "history"];
     // Each poll is a Worker invocation (100k/day on the free plan): keep it rare.
     const REFRESH_MS = 600_000;
+    const DESKTOP = window.matchMedia("(min-width: 960px)");
 
     const params = new URLSearchParams(location.search);
     const initialView = params.get("view") as RadarView | null;
@@ -187,7 +184,7 @@ const views = ["now", "planned", "history"] as const;
       query: params.get("q") ?? "",
       limit: HISTORY_PAGE,
       selectedId: null as number | null,
-      drawerOpen: false,
+      hoverId: null as number | null,
       loading: false,
       error: false,
       /** True while only the embedded "now" subset is loaded. */
@@ -196,35 +193,35 @@ const views = ["now", "planned", "history"] as const;
     };
 
     const $ = <T extends Element>(selector: string) => document.querySelector<T>(selector)!;
+    const radarEl = $<HTMLElement>("[data-radar]");
     const listEl = $<HTMLElement>("#radar-list");
-    const scrollEl = $<HTMLElement>("#radar-scroll");
+    const sideEl = $<HTMLElement>("#radar-scroll");
     const countEl = $<HTMLElement>("#radar-count");
     const noteEl = $<HTMLElement>("#radar-note");
     const moreBtn = $<HTMLButtonElement>("#radar-more");
     const searchEl = $<HTMLInputElement>("#radar-search");
-    const panelEl = $<HTMLElement>("#radar-panel");
-    const sheetEl = $<HTMLElement>("#radar-sheet");
-    const sheetBody = $<HTMLElement>("#radar-sheet-body");
-    const sheetLink = $<HTMLAnchorElement>("#radar-sheet-link");
-    const fabEl = $<HTMLButtonElement>("#radar-list-fab");
-    const fabCountEl = $<HTMLElement>("#radar-fab-count");
+    const clearBtn = $<HTMLButtonElement>("#radar-search-clear");
+    const natureEl = $<HTMLSelectElement>("#radar-nature");
+    const liveEl = $<HTMLElement>("[data-live]");
     const mapWrap = $<HTMLElement>(".radar__map-wrap");
     searchEl.value = state.query;
+    natureEl.value = state.nature;
+    clearBtn.hidden = !state.query;
 
     const CANTON_CENTROIDS = new Map(SWISS_CANTONS.map((canton) => [canton.code, canton.centroid]));
     const cssVar = (name: string, fallback: string) =>
       getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
-    const TONE_COLOR = () => ({
+    const palette = () => ({
       active: cssVar("--status-active", "#cb2a2f"),
-      upcoming: cssVar("--status-upcoming", "#b45309"),
-      resolved: cssVar("--status-resolved", "#2f7d4f"),
-      other: cssVar("--status-archive", "#6b7280")
+      upcoming: cssVar("--status-upcoming", "#9a5a00"),
+      ended: cssVar("--pin-ended", "#8b8f97"),
+      ring: cssVar("--surface", "#ffffff"),
+      ink: cssVar("--text", "#17181c")
     });
-    let colors = TONE_COLOR();
 
-    const isMobile = () => window.matchMedia("(max-width: 899px)").matches;
     const now = () => Date.now();
     const searching = () => state.query.trim().length > 0;
+    const scroller = () => (DESKTOP.matches ? sideEl : document.scrollingElement ?? document.documentElement);
 
     function filtered(): RadarItem[] {
       const t = now();
@@ -257,61 +254,39 @@ const views = ["now", "planned", "history"] as const;
     // ---------------------------------------------------------------- map
     let map: any = null;
     let maplibregl: any = null;
+    let popup: any = null;
     let mapReady = false;
     let mapInit: Promise<any> | null = null;
     let lastFitKey = "";
 
-    const markerId = (shape: "triangle" | "square", color: string, selected: boolean) =>
-      `pin-${shape}-${color.replace(/[^a-z0-9]/gi, "")}-${selected ? "s" : "n"}`;
-
-    function drawMarker(shape: "triangle" | "square", color: string, selected: boolean) {
-      const dpr = 2;
-      const size = (selected ? 30 : 22) * dpr;
-      const canvas = document.createElement("canvas");
-      canvas.width = size;
-      canvas.height = size;
-      const ctx = canvas.getContext("2d")!;
-      const pad = (selected ? 3.5 : 3) * dpr;
-      ctx.lineJoin = "round";
-      ctx.lineWidth = 2.2 * dpr;
-      ctx.fillStyle = color;
-      ctx.strokeStyle = "#fff";
-      ctx.beginPath();
-      if (shape === "triangle") {
-        ctx.moveTo(size / 2, pad);
-        ctx.lineTo(size - pad, size - pad * 0.85);
-        ctx.lineTo(pad, size - pad * 0.85);
-        ctx.closePath();
-      } else {
-        const r = 2.5 * dpr;
-        const w = size - pad * 2;
-        ctx.moveTo(pad + r, pad);
-        ctx.arcTo(pad + w, pad, pad + w, pad + w, r);
-        ctx.arcTo(pad + w, pad + w, pad, pad + w, r);
-        ctx.arcTo(pad, pad + w, pad, pad, r);
-        ctx.arcTo(pad, pad, pad + w, pad, r);
-        ctx.closePath();
-      }
-      ctx.fill();
-      ctx.stroke();
-      return { width: size, height: size, data: new Uint8Array(ctx.getImageData(0, 0, size, size).data) };
-    }
+    const toneKey = (item: RadarItem) => {
+      const tone = toneOf(item.status);
+      return tone === "active" || tone === "upcoming" ? tone : "ended";
+    };
 
     function featuresFor(items: RadarItem[]) {
       return items.flatMap((item) => {
         const coords = pinFor(item);
         if (!coords) return [];
-        const shape = item.nature === "planned" ? "square" : "triangle";
-        const color = colors[toneOf(item.status)];
-        const selected = state.selectedId === item.id;
-        const icon = markerId(shape, color, selected);
-        if (map && !map.hasImage(icon)) map.addImage(icon, drawMarker(shape, color, selected), { pixelRatio: 2 });
+        const tone = toneKey(item);
         return [{
           type: "Feature" as const,
-          properties: { id: item.id, icon, rank: selected ? 3 : item.status === "active" ? 2 : item.status === "upcoming" ? 1 : 0 },
+          id: item.id,
+          properties: { id: item.id, tone, rank: tone === "active" ? 2 : tone === "upcoming" ? 1 : 0 },
           geometry: { type: "Point" as const, coordinates: coords }
         }];
       });
+    }
+
+    function applyPinPaint() {
+      if (!map?.getLayer("outages-pin")) return;
+      const c = palette();
+      const color = ["match", ["get", "tone"], "active", c.active, "upcoming", c.upcoming, c.ended];
+      map.setPaintProperty("outages-halo", "circle-color", c.active);
+      map.setPaintProperty("outages-pin", "circle-color", color);
+      map.setPaintProperty("outages-pin", "circle-stroke-color", c.ring);
+      map.setPaintProperty("outages-focus", "circle-stroke-color", c.ink);
+      map.setPaintProperty("outages-focus", "circle-color", color);
     }
 
     async function ensureMap() {
@@ -327,8 +302,10 @@ const views = ["now", "planned", "history"] as const;
         map = new maplibregl.Map({
           container,
           style: "https://vectortiles.geo.admin.ch/styles/ch.swisstopo.lightbasemap.vt/style.json",
-          center: [8.2275, 46.8182],
-          zoom: 7.2,
+          center: DESKTOP.matches ? [7.4, 46.8182] : [8.2275, 46.8182],
+          zoom: DESKTOP.matches ? 7.2 : 6.3,
+          minZoom: 5.5,
+          maxBounds: [[4.2, 44.6], [12.4, 48.6]],
           attributionControl: false,
           antialias: false,
           fadeDuration: reduce ? 0 : 120,
@@ -336,8 +313,11 @@ const views = ["now", "planned", "history"] as const;
           pitchWithRotate: false,
           dragRotate: false,
           touchPitch: false,
+          // On the scrolling mobile page one finger scrolls the page, two move the map.
+          cooperativeGestures: !DESKTOP.matches,
           pixelRatio: Math.min(window.devicePixelRatio || 1, 1.5)
         });
+        map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
         map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
         await new Promise<void>((resolve) => {
           const fail = window.setTimeout(resolve, 12_000);
@@ -348,26 +328,40 @@ const views = ["now", "planned", "history"] as const;
         });
         if (!map.getSource("outages")) {
           map.addSource("outages", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
-          map.addLayer({ id: "outages-hit", type: "circle", source: "outages", paint: { "circle-radius": 16, "circle-color": "#000", "circle-opacity": 0 } });
           map.addLayer({
-            id: "outages-point",
-            type: "symbol",
+            id: "outages-halo",
+            type: "circle",
             source: "outages",
-            layout: {
-              "icon-image": ["get", "icon"],
-              "icon-allow-overlap": true,
-              "icon-ignore-placement": true,
-              "symbol-sort-key": ["get", "rank"]
+            filter: ["==", ["get", "tone"], "active"],
+            paint: { "circle-radius": 15, "circle-opacity": 0.16, "circle-color": "#cb2a2f" }
+          });
+          map.addLayer({
+            id: "outages-pin",
+            type: "circle",
+            source: "outages",
+            layout: { "circle-sort-key": ["get", "rank"] },
+            paint: {
+              "circle-radius": ["match", ["get", "tone"], "active", 7, "upcoming", 6, 4.5],
+              "circle-stroke-width": 2,
+              "circle-color": "#cb2a2f",
+              "circle-stroke-color": "#ffffff"
             }
           });
+          map.addLayer({
+            id: "outages-focus",
+            type: "circle",
+            source: "outages",
+            filter: ["==", ["get", "id"], -1],
+            paint: { "circle-radius": 9, "circle-stroke-width": 3, "circle-color": "#cb2a2f", "circle-stroke-color": "#17181c" }
+          });
+          applyPinPaint();
           const pick = (event: any) => {
             const id = Number(event.features?.[0]?.properties?.id);
-            if (Number.isFinite(id)) selectItem(id, { openSheet: isMobile(), scroll: true });
+            if (Number.isFinite(id)) selectItem(id, { popup: true, scroll: true });
           };
-          map.on("click", "outages-hit", pick);
-          map.on("click", "outages-point", pick);
-          map.on("mouseenter", "outages-hit", () => { map.getCanvas().style.cursor = "pointer"; });
-          map.on("mouseleave", "outages-hit", () => { map.getCanvas().style.cursor = ""; });
+          map.on("click", "outages-pin", pick);
+          map.on("mouseenter", "outages-pin", () => { map.getCanvas().style.cursor = "pointer"; });
+          map.on("mouseleave", "outages-pin", () => { map.getCanvas().style.cursor = ""; });
         }
         map.resize();
         mapReady = true;
@@ -377,27 +371,46 @@ const views = ["now", "planned", "history"] as const;
       return mapInit;
     }
 
-    function syncPins(fit: boolean, recenter = false) {
+    function syncFocus() {
+      if (!map?.getLayer("outages-focus")) return;
+      const id = state.hoverId ?? state.selectedId ?? -1;
+      map.setFilter("outages-focus", ["==", ["get", "id"], id]);
+    }
+
+    function syncPins(fit: boolean) {
       if (!map || !mapReady) return;
-      const items = visibleItems();
-      const features = featuresFor(items);
+      const features = featuresFor(visibleItems());
       map.getSource("outages")?.setData({ type: "FeatureCollection", features });
-      const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      if (recenter && state.selectedId != null) {
-        const selected = state.items.find((item) => item.id === state.selectedId);
-        const coords = selected ? pinFor(selected) : null;
-        if (coords) {
-          map.easeTo({ center: coords, zoom: Math.max(map.getZoom(), 10), duration: reduce ? 0 : 280 });
-          return;
-        }
-      }
+      syncFocus();
       if (!fit || !features.length) return;
       const key = `${state.view}|${state.nature}|${state.query}|${features.length}`;
       if (key === lastFitKey) return;
       lastFitKey = key;
       const bounds = new maplibregl.LngLatBounds();
       for (const feature of features) bounds.extend(feature.geometry.coordinates);
-      map.fitBounds(bounds, { padding: isMobile() ? 56 : 48, maxZoom: 10.5, duration: reduce ? 0 : 400 });
+      const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      // On desktop the side panel floats over the left of the map: keep pins clear of it.
+      const panel = DESKTOP.matches ? sideEl.getBoundingClientRect().right - mapWrap.getBoundingClientRect().left : 0;
+      const padding = DESKTOP.matches ? { top: 72, bottom: 72, right: 88, left: Math.max(72, panel + 56) } : 32;
+      map.fitBounds(bounds, { padding, maxZoom: 10.5, duration: reduce ? 0 : 400 });
+    }
+
+    function showPopup(item: RadarItem) {
+      const coords = pinFor(item);
+      if (!coords || !map) return;
+      popup?.remove();
+      const body = rowHtml(item, now(), copy).replace(/^<a /, "<div ").replace(/<\/a>$/, "</div>");
+      popup = new maplibregl.Popup({ closeButton: true, closeOnClick: true, maxWidth: "min(23rem, calc(100vw - 2rem))", offset: 12, className: "radar-popup" })
+        .setLngLat(coords)
+        .setHTML(`${body}<a class="radar-popup__link" href="${eventHref(item, copy).replace(/"/g, "&quot;")}">${copy.openReport.replace(/</g, "&lt;")} →</a>`)
+        .addTo(map);
+      popup.on("close", () => {
+        if (state.selectedId === item.id) {
+          state.selectedId = null;
+          markSelected();
+          syncFocus();
+        }
+      });
     }
 
     // ----------------------------------------------------------- render
@@ -405,22 +418,28 @@ const views = ["now", "planned", "history"] as const;
       return value.replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char]!);
     }
 
+    function renderLive() {
+      const t = now();
+      const active = state.items.filter((item) => item.status === "active" && matchesNature(item, "")).length;
+      const counts = viewCounts(state.items, "", t);
+      const planned = state.partial && state.embeddedCounts ? state.embeddedCounts.planned : counts.planned;
+      const set = (selector: string, value: string) => {
+        const el = liveEl.querySelector(selector);
+        if (el) el.textContent = value;
+      };
+      set('[data-live-count="active"]', String(active));
+      set('[data-live-count="upcoming"]', String(planned));
+      set('[data-live-label="active"]', active === 1 ? copy.tiles.activeOne : copy.tiles.activeOther);
+      set('[data-live-label="upcoming"]', planned === 1 ? copy.tiles.plannedOne : copy.tiles.plannedOther);
+      liveEl.toggleAttribute("data-has-active", active > 0);
+    }
+
     function renderControls() {
-      const counts = viewCounts(state.items, state.nature, now());
-      // With only the "now" subset loaded, planned/history counts come from the server.
-      if (state.partial && state.embeddedCounts && !state.nature) {
-        counts.planned = state.embeddedCounts.planned;
-        counts.history = state.embeddedCounts.history;
-      }
       document.querySelectorAll<HTMLButtonElement>("[data-view]").forEach((button) => {
-        const view = button.dataset.view as RadarView;
-        button.setAttribute("aria-pressed", String(!searching() && view === state.view));
-        const n = button.querySelector("[data-view-count]");
-        if (n) n.textContent = String(counts[view]);
+        button.setAttribute("aria-pressed", String(!searching() && button.dataset.view === state.view));
       });
-      document.querySelectorAll<HTMLButtonElement>("[data-nature]").forEach((button) => {
-        button.setAttribute("aria-pressed", String((button.dataset.nature ?? "") === state.nature));
-      });
+      natureEl.value = state.nature;
+      radarEl.dataset.view = searching() ? "search" : state.view;
     }
 
     function renderList() {
@@ -429,11 +448,10 @@ const views = ["now", "planned", "history"] as const;
       const shown = visibleItems(all);
       listEl.setAttribute("aria-busy", state.loading && !state.items.length ? "true" : "false");
       countEl.textContent = countLabel(all.length, copy);
-      fabCountEl.textContent = String(all.length);
       moreBtn.hidden = shown.length >= all.length;
       moreBtn.textContent = copy.showMore.replace("{{count}}", String(Math.min(HISTORY_PAGE, all.length - shown.length)));
       if (state.error && !state.items.length) {
-        listEl.innerHTML = `<div class="radar__empty" role="alert"><p>${escapeText(copy.empty.history)}</p><button type="button" class="radar__ghost" data-retry>↻</button></div>`;
+        listEl.innerHTML = `<div class="radar__empty" role="alert"><p>${escapeText(copy.empty.history)}</p><button type="button" class="btn-quiet" data-retry>↻</button></div>`;
         return;
       }
       if (!shown.length) {
@@ -442,98 +460,97 @@ const views = ["now", "planned", "history"] as const;
         return;
       }
       const focusedId = (document.activeElement as HTMLElement | null)?.closest?.<HTMLElement>("a.radar-item[data-id]")?.dataset.id;
-      listEl.innerHTML = groupsHtml(groupItems(shown, state.view, t, copy, searching()), t, copy, state.selectedId);
+      const groups = groupItems(shown, state.view, t, copy, searching());
+      listEl.innerHTML = groupsHtml(state.view === "now" && !searching() ? limitRecent(groups) : groups, t, copy, state.selectedId);
       // Re-rendering replaces the rows; keep keyboard users where they were.
       if (focusedId) listEl.querySelector<HTMLElement>(`a.radar-item[data-id="${focusedId}"]`)?.focus({ preventScroll: true });
     }
 
     function renderNote() {
       if (!state.generatedAt) return;
-      const date = new Date(state.generatedAt).toLocaleString(copy.dateLocale, { dateStyle: "short", timeStyle: "short", timeZone: "Europe/Zurich" });
+      const date = new Date(state.generatedAt).toLocaleString(copy.dateLocale, { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Zurich" });
       noteEl.textContent = copy.asOf.replace("{{date}}", date);
     }
 
     function render(opts: { fit?: boolean } = {}) {
+      renderLive();
       renderControls();
       renderList();
       renderNote();
-      syncPanelA11y();
       if (state.items.length) void ensureMap().then(() => syncPins(Boolean(opts.fit)));
     }
 
+    function markSelected() {
+      listEl.querySelectorAll<HTMLElement>("a.radar-item.is-selected").forEach((row) => {
+        row.classList.remove("is-selected");
+        row.removeAttribute("aria-current");
+      });
+      if (state.selectedId == null) return;
+      const row = listEl.querySelector<HTMLElement>(`a.radar-item[data-id="${state.selectedId}"]`);
+      row?.classList.add("is-selected");
+      row?.setAttribute("aria-current", "true");
+    }
+
     // ------------------------------------------------------ interaction
-    function syncPanelA11y() {
-      fabEl.hidden = !isMobile() || state.drawerOpen;
-      if (isMobile()) {
-        panelEl.toggleAttribute("inert", !state.drawerOpen);
-        panelEl.setAttribute("aria-hidden", state.drawerOpen ? "false" : "true");
-        fabEl.setAttribute("aria-expanded", String(state.drawerOpen));
-      } else {
-        panelEl.removeAttribute("inert");
-        panelEl.removeAttribute("aria-hidden");
-      }
-    }
-
-    function setDrawer(open: boolean) {
-      state.drawerOpen = open;
-      panelEl.classList.toggle("is-open", open);
-      document.body.classList.toggle("radar-drawer-open", open);
-      syncPanelA11y();
-      if (open) window.setTimeout(() => map?.resize(), 280);
-    }
-
-    function openSheet(item: RadarItem) {
-      sheetBody.innerHTML = rowHtml(item, now(), copy).replace(/^<a /, "<div ").replace(/<\/a>$/, "</div>");
-      sheetLink.href = eventHref(item, copy);
-      sheetEl.hidden = false;
-    }
-
-    function closeSheet() {
-      sheetEl.hidden = true;
-    }
-
-    function selectItem(id: number, opts: { openSheet?: boolean; scroll?: boolean } = {}) {
+    function selectItem(id: number, opts: { popup?: boolean; scroll?: boolean } = {}) {
       state.selectedId = id;
-      renderList();
-      syncPins(false, true);
+      markSelected();
+      syncFocus();
       const item = state.items.find((entry) => entry.id === id);
-      if (item && opts.openSheet && isMobile()) {
-        setDrawer(false);
-        openSheet(item);
-      }
-      if (opts.scroll) listEl.querySelector<HTMLElement>(`[data-id="${id}"]`)?.scrollIntoView({ block: "nearest" });
+      if (item && opts.popup) showPopup(item);
+      // Only the desktop side column scrolls to the row; on mobile the map stays in view.
+      if (opts.scroll && DESKTOP.matches) listEl.querySelector<HTMLElement>(`[data-id="${id}"]`)?.scrollIntoView({ block: "nearest" });
     }
 
     function resetSelection() {
       state.selectedId = null;
-      closeSheet();
+      state.hoverId = null;
+      popup?.remove();
       lastFitKey = "";
     }
 
-    document.querySelectorAll<HTMLButtonElement>("[data-view]").forEach((button) => button.addEventListener("click", () => {
-      state.view = button.dataset.view as RadarView;
+    function scrollListTop() {
+      const target = scroller();
+      const top = DESKTOP.matches ? 0 : Math.max(0, listEl.getBoundingClientRect().top + window.scrollY - 140);
+      if (!DESKTOP.matches && window.scrollY <= top) return;
+      target.scrollTo({ top, behavior: "auto" });
+    }
+
+    function setView(view: RadarView) {
+      state.view = view;
       if (state.partial && state.view !== "now") void loadIndex();
       state.limit = HISTORY_PAGE;
       if (searching()) {
         state.query = "";
         searchEl.value = "";
+        clearBtn.hidden = true;
       }
       resetSelection();
       syncUrl();
-      scrollEl.scrollTop = 0;
       render({ fit: true });
-    }));
+      scrollListTop();
+    }
 
-    document.querySelectorAll<HTMLButtonElement>("[data-nature]").forEach((button) => button.addEventListener("click", () => {
-      state.nature = (button.dataset.nature ?? "") as RadarNature;
+    document.querySelectorAll<HTMLButtonElement>("[data-view]").forEach((button) => button.addEventListener("click", () => setView(button.dataset.view as RadarView)));
+
+    document.addEventListener("click", (event) => {
+      const go = (event.target as HTMLElement).closest<HTMLElement>("[data-go-view]");
+      if (!go) return;
+      setView(go.dataset.goView as RadarView);
+      if (!DESKTOP.matches) listEl.scrollIntoView({ block: "start", behavior: "smooth" });
+    });
+
+    natureEl.addEventListener("change", () => {
+      state.nature = natureEl.value as RadarNature;
       resetSelection();
       syncUrl();
       render({ fit: true });
-    }));
+    });
 
     let searchTimer = 0;
     searchEl.addEventListener("input", () => {
       window.clearTimeout(searchTimer);
+      clearBtn.hidden = !searchEl.value;
       if (state.partial) void loadIndex();
       searchTimer = window.setTimeout(() => {
         state.query = searchEl.value;
@@ -544,22 +561,43 @@ const views = ["now", "planned", "history"] as const;
       }, 120);
     });
 
-    listEl.addEventListener("click", (event) => {
-      const target = event.target as HTMLElement;
-      if (target.closest("[data-retry]")) {
-        void loadIndex();
-        return;
-      }
-      const row = target.closest<HTMLAnchorElement>("a.radar-item[data-id]");
-      if (!row) return;
-      const mouse = event as MouseEvent;
-      if (mouse.metaKey || mouse.ctrlKey || mouse.shiftKey || mouse.button === 1) return;
-      const id = Number(row.dataset.id);
-      if (!Number.isFinite(id)) return;
-      // First click previews on the map, the second opens the report.
-      if (!isMobile() && state.selectedId === id) return;
+    searchEl.form?.addEventListener("submit", (event) => {
       event.preventDefault();
-      selectItem(id, { openSheet: isMobile() });
+      searchEl.blur();
+      listEl.scrollIntoView({ block: "start", behavior: "smooth" });
+    });
+
+    function clearSearch() {
+      searchEl.value = "";
+      clearBtn.hidden = true;
+      state.query = "";
+      resetSelection();
+      syncUrl();
+      render({ fit: true });
+    }
+
+    clearBtn.addEventListener("click", () => {
+      clearSearch();
+      searchEl.focus();
+    });
+
+    listEl.addEventListener("click", (event) => {
+      if ((event.target as HTMLElement).closest("[data-retry]")) void loadIndex(true);
+    });
+
+    // Hovering or focusing a row lights up its pin.
+    const hoverRow = (event: Event) => {
+      const row = (event.target as HTMLElement).closest<HTMLElement>("a.radar-item[data-id]");
+      const id = row ? Number(row.dataset.id) : null;
+      if (id === state.hoverId) return;
+      state.hoverId = id;
+      syncFocus();
+    };
+    listEl.addEventListener("mouseover", hoverRow);
+    listEl.addEventListener("focusin", hoverRow);
+    listEl.addEventListener("mouseleave", () => {
+      state.hoverId = null;
+      syncFocus();
     });
 
     moreBtn.addEventListener("click", () => {
@@ -568,51 +606,30 @@ const views = ["now", "planned", "history"] as const;
     });
 
     $<HTMLButtonElement>("#radar-refresh").addEventListener("click", () => void loadIndex(true));
-    $<HTMLButtonElement>("#radar-sheet-close").addEventListener("click", () => {
-      closeSheet();
-      state.selectedId = null;
-      render();
-    });
-    $<HTMLButtonElement>("#radar-panel-close").addEventListener("click", () => setDrawer(false));
-    fabEl.addEventListener("click", () => setDrawer(true));
 
     document.addEventListener("keydown", (event) => {
-      const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement;
+      const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement;
       if (event.key === "/" && !typing && !event.metaKey && !event.ctrlKey) {
         event.preventDefault();
-        if (isMobile()) setDrawer(true);
         searchEl.focus();
         searchEl.select();
       } else if (event.key === "Escape") {
-        if (typing && searchEl.value) {
-          searchEl.value = "";
-          state.query = "";
-          syncUrl();
-          render({ fit: true });
-        } else if (state.selectedId != null) {
+        if (event.target === searchEl && searchEl.value) clearSearch();
+        else if (state.selectedId != null) {
           resetSelection();
-          render();
-        } else if (state.drawerOpen) {
-          setDrawer(false);
+          markSelected();
+          syncFocus();
         }
       }
     });
 
     let resizeTimer = 0;
     window.addEventListener("resize", () => {
-      if (!isMobile()) {
-        setDrawer(false);
-        closeSheet();
-      }
-      syncPanelA11y();
       window.clearTimeout(resizeTimer);
       resizeTimer = window.setTimeout(() => map?.resize(), 120);
     });
 
-    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
-      colors = TONE_COLOR();
-      syncPins(false);
-    });
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => applyPinPaint());
 
     // ------------------------------------------------------------- data
     function applyIndex(payload: any) {
@@ -668,51 +685,34 @@ const views = ["now", "planned", "history"] as const;
 </RadarLayout>
 
 <style is:global>
-  body.shell-radar {
-    overflow: hidden;
-    height: 100dvh;
+  :root {
+    --pin-ended: #8e8e98;
+    --panel-w: 27rem;
   }
 
-  body.shell-radar .app-frame {
-    height: 100dvh;
-    max-height: 100dvh;
-    overflow: hidden;
-  }
-
-  body.shell-radar .app-main--radar {
-    flex: 1;
-    min-height: 0;
-    overflow: hidden;
+  /* ───────────── mobile: full-bleed map, then a sheet that slides over it */
+  .radar {
+    position: relative;
     display: flex;
     flex-direction: column;
   }
 
-  .sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border: 0;
-  }
-
-  .radar {
-    position: relative;
-    flex: 1;
-    min-height: 0;
-    height: 100%;
-    overflow: hidden;
-    background: var(--map-placeholder, #e8ebe7);
-  }
-
   .radar__map-wrap {
-    position: absolute;
-    inset: 0;
-    background: var(--map-placeholder, #e8ebe7);
+    position: relative;
+    height: clamp(15rem, 42vh, 24rem);
+    background: var(--map-placeholder);
+    isolation: isolate;
   }
+
+  .radar__side {
+    position: relative;
+    z-index: 3;
+    margin-top: -1.5rem;
+    border-radius: 1.5rem 1.5rem 0 0;
+    background: var(--background);
+    box-shadow: 0 -1px 0 var(--hairline), 0 -12px 32px -16px rgb(16 17 20 / 0.25);
+  }
+
 
   .radar__map-wrap:not(.is-ready)::after {
     content: attr(data-loading-label);
@@ -721,7 +721,7 @@ const views = ["now", "planned", "history"] as const;
     display: grid;
     place-items: center;
     color: var(--text-muted);
-    font-size: 0.85rem;
+    font-size: 0.8rem;
     font-weight: 550;
     pointer-events: none;
     z-index: 1;
@@ -732,238 +732,74 @@ const views = ["now", "planned", "history"] as const;
     height: 100%;
   }
 
-  .radar__legend {
-    position: absolute;
-    left: 0.75rem;
-    bottom: 0.75rem;
-    z-index: 2;
-    display: none;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-    padding: 0.35rem 0.65rem;
-    border: 1px solid var(--hairline);
-    border-radius: var(--radius);
-    background: color-mix(in oklch, var(--surface) 92%, transparent);
-    color: var(--text-muted);
-    font-size: 0.7rem;
-    pointer-events: none;
-  }
-
-  .radar__legend span {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-  }
-
-  .legend-dot {
-    width: 0.5rem;
-    height: 0.5rem;
-    border-radius: 99px;
-  }
-
-  .legend-dot[data-tone="active"] { background: var(--status-active); }
-  .legend-dot[data-tone="upcoming"] { background: var(--status-upcoming); }
-  .legend-dot[data-tone="resolved"] { background: var(--status-resolved); }
-
-  .legend-shape {
-    display: inline-block;
-    flex: none;
-    background: currentColor;
-  }
-
-  .legend-shape--square {
-    width: 0.5rem;
-    height: 0.5rem;
-    border-radius: 2px;
-  }
-
-  .legend-shape--triangle {
-    width: 0.6rem;
-    height: 0.52rem;
-    clip-path: polygon(50% 0, 100% 100%, 0 100%);
-  }
-
-  .radar__disclaimer {
-    display: none;
-  }
-
-  .radar__hud {
-    position: relative;
-    z-index: 5;
-    padding: calc(0.4rem + env(safe-area-inset-top, 0px)) 0.6rem 0.3rem;
-    pointer-events: none;
-  }
-
-  .radar__hud > * {
-    pointer-events: auto;
-  }
-
-  .radar__hud-bar {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    gap: 0.5rem;
-    align-items: center;
-    padding: 0.35rem 0.4rem;
-    border: 1px solid var(--hairline);
-    border-radius: calc(var(--radius) + 2px);
-    background: color-mix(in oklch, var(--surface) 88%, transparent);
-    box-shadow: var(--shadow-float);
-  }
-
-  @supports (backdrop-filter: blur(12px)) {
-    .radar__hud-bar {
-      background: color-mix(in oklch, var(--surface) 72%, transparent);
-      backdrop-filter: blur(18px) saturate(1.1);
+  @media (prefers-color-scheme: dark) {
+    :root:not(.light) .radar__map canvas {
+      filter: brightness(0.62) contrast(1.08) saturate(0.6);
     }
   }
 
-  .radar__brand {
-    padding: 0 0.3rem;
-    color: var(--text);
-    font-size: 0.95rem;
-    font-weight: 680;
-    letter-spacing: -0.02em;
-    text-decoration: none;
+  /* Intro: the state of the country as a headline */
+  .radar__intro {
+    display: grid;
+    gap: 1.1rem;
+    padding: 1.35rem 1.25rem 1.1rem;
   }
 
-  .radar__search {
-    min-width: 0;
-    height: 2.4rem;
-    min-height: 2.4rem;
-  }
-
-  .radar__hud [data-slot="input-group"] {
-    height: 2.4rem;
-    min-height: 2.4rem;
-    background: var(--surface);
-  }
-
-  .radar__kbd {
-    display: none;
-    margin-right: 0.5rem;
-    padding: 0.05rem 0.4rem;
-    border: 1px solid var(--hairline);
-    border-radius: 4px;
-    color: var(--text-faint);
-    font: 500 0.7rem/1.4 var(--font-sans);
-  }
-
-  .radar__filters {
+  .radar__meta {
     display: flex;
-    gap: 0.4rem;
-    margin-top: 0.4rem;
-    overflow-x: auto;
-    scrollbar-width: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
   }
 
-  .radar__views,
-  .radar__nature {
-    display: inline-flex;
-    flex: none;
-    gap: 2px;
-    padding: 2px;
-    border: 1px solid var(--hairline);
-    border-radius: var(--radius);
-    background: var(--surface-2);
-  }
-
-  .radar-view,
-  .radar-toggle {
+  .live-chip {
     display: inline-flex;
     align-items: center;
-    gap: 0.4rem;
-    min-height: 2rem;
-    padding: 0.25rem 0.65rem;
-    border: 0;
-    border-radius: calc(var(--radius) - 2px);
-    background: transparent;
+    gap: 0.45rem;
     color: var(--text-muted);
-    font: 550 0.8rem/1 var(--font-sans);
-    cursor: pointer;
-    white-space: nowrap;
-    transition: background-color 120ms ease, color 120ms ease;
+    font-size: 0.75rem;
+    font-weight: 600;
   }
 
-  .radar-view:hover,
-  .radar-toggle:hover {
-    color: var(--text);
+  .live-chip i {
+    width: 0.45rem;
+    height: 0.45rem;
+    border-radius: 99px;
+    background: var(--status-active);
+    animation: radar-ping 2s var(--ease-out) infinite;
   }
 
-  .radar-view[aria-pressed="true"],
-  .radar-toggle[aria-pressed="true"] {
-    background: var(--surface);
-    color: var(--text);
-    box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
-  }
-
-  .radar-view:focus-visible,
-  .radar-toggle:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 1px;
-  }
-
-  .radar-view__n {
+  .radar__updated {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.1rem;
     color: var(--text-faint);
-    font-size: 0.72rem;
+    font-size: 0.75rem;
     font-variant-numeric: tabular-nums;
   }
 
-  .radar-toggle .legend-shape {
-    color: var(--text-muted);
-  }
-
-  .radar__panel {
-    position: absolute;
-    z-index: 6;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    max-height: min(74dvh, calc(100dvh - var(--app-dock-h) - 5rem));
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    background: var(--surface);
-    border-top: 1px solid var(--hairline);
-    border-radius: 0.9rem 0.9rem 0 0;
-    box-shadow: var(--shadow-float);
-    transform: translateY(110%);
-    transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
-  }
-
-  .radar__panel.is-open {
-    transform: translateY(0);
-  }
-
-  .radar__handle {
-    width: 2.25rem;
-    height: 0.25rem;
-    margin: 0.55rem auto 0;
+  .icon-btn {
+    display: inline-grid;
+    place-items: center;
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    border: 0;
     border-radius: 99px;
-    background: var(--hairline-strong, var(--hairline));
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
 
-  .radar__panel-head {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 0.75rem;
-    padding: 0.55rem 1rem 0.5rem;
-    border-bottom: 1px solid var(--hairline);
-    flex-shrink: 0;
+  .icon-btn svg {
+    width: 1rem;
+    height: 1rem;
   }
 
-  .radar__panel-head h1 {
-    margin: 0;
-    font-size: 1rem;
-    font-weight: 640;
-    letter-spacing: -0.015em;
-    line-height: 1.3;
-  }
-
-  .radar__panel-actions {
-    display: flex;
-    gap: 0.25rem;
-    flex-shrink: 0;
+  .icon-btn:hover {
+    background: var(--surface-2);
+    color: var(--text);
   }
 
   #radar-refresh.is-spinning svg {
@@ -974,68 +810,530 @@ const views = ["now", "planned", "history"] as const;
     to { transform: rotate(360deg); }
   }
 
-  .radar__count,
-  .radar__note {
-    margin: 0.2rem 0 0;
+  .radar__h1 {
+    margin: -0.35rem 0 0;
     color: var(--text-muted);
-    font-size: 0.76rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.3;
+  }
+
+  .pulse {
+    display: grid;
+    gap: 0.35rem;
+    margin-top: -0.35rem;
+  }
+
+  .pulse__line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 0.45rem;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .pulse__line--active {
+    font-size: clamp(2rem, 1.6rem + 1.6vw, 2.55rem);
+    font-weight: 700;
+    letter-spacing: -0.045em;
+    line-height: 1.04;
+  }
+
+  .pulse__line--active .pulse__n {
+    color: var(--text);
+  }
+
+  .pulse[data-has-active] .pulse__line--active .pulse__n {
+    color: var(--status-active);
+  }
+
+  .pulse__line--upcoming {
+    color: var(--text-muted);
+    font-size: 1.05rem;
+    font-weight: 560;
+    letter-spacing: -0.015em;
+    line-height: 1.35;
+  }
+
+  .pulse__line--upcoming .pulse__n {
+    color: var(--status-upcoming);
+    font-weight: 700;
+  }
+
+  .pulse__n {
     font-variant-numeric: tabular-nums;
   }
 
-  .radar__scroll {
+  .pulse__hint {
+    color: var(--text-faint);
+  }
+
+  .pulse__line:hover .pulse__label {
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 0.18em;
+  }
+
+  /* Search: one calm filled field */
+  .radar__search {
+    display: grid;
+    gap: 0.45rem;
+    margin: 0.15rem 0 0;
+  }
+
+  .radar__search-label {
+    color: var(--text);
+    font-size: 0.82rem;
+    font-weight: 600;
+  }
+
+  .search-field {
+    position: relative;
+    display: flex;
+    align-items: center;
+    height: 3.15rem;
+    border-radius: 0.95rem;
+    background: var(--surface);
+    box-shadow: 0 0 0 1px var(--hairline), var(--shadow-card);
+    transition: box-shadow var(--dur-fast) var(--ease-out);
+  }
+
+  .search-field:focus-within {
+    box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px color-mix(in oklch, var(--accent) 20%, transparent);
+  }
+
+  .search-field__icon {
+    position: absolute;
+    left: 1rem;
+    width: 1.1rem;
+    height: 1.1rem;
+    color: var(--text-faint);
+    pointer-events: none;
+  }
+
+  .search-field input {
     flex: 1;
+    min-width: 0;
+    height: 100%;
+    padding: 0 0.5rem 0 2.8rem;
+    border: 0;
+    border-radius: inherit;
+    background: transparent;
+    color: var(--text);
+    font: 500 1rem/1 var(--font-sans);
+    letter-spacing: -0.01em;
+    outline: none;
+    box-shadow: none;
+  }
+
+  .search-field input:focus,
+  .search-field input:focus-visible {
+    outline: none;
+    box-shadow: none;
+  }
+
+  .search-field input::placeholder {
+    color: var(--text-faint);
+    font-weight: 450;
+  }
+
+  .search-field input::-webkit-search-cancel-button {
+    display: none;
+  }
+
+  .search-field__kbd {
+    display: none;
+    margin-right: 0.8rem;
+    padding: 0.05rem 0.45rem;
+    border-radius: 6px;
+    background: var(--surface-2);
+    color: var(--text-faint);
+    font: 600 0.7rem/1.5 var(--font-sans);
+  }
+
+  .search-field__clear {
+    margin-right: 0.45rem;
+  }
+
+  .search-field__clear[hidden],
+  .search-field:has(.search-field__clear:not([hidden])) .search-field__kbd {
+    display: none;
+  }
+
+  /* Map chrome */
+  .radar__legend {
+    position: absolute;
+    left: 0.75rem;
+    top: 0.75rem;
+    z-index: 2;
+    display: flex;
+    gap: 0.75rem;
+    padding: 0.35rem 0.7rem;
+    border-radius: 99px;
+    background: var(--glass);
+    box-shadow: var(--shadow-glass);
+    backdrop-filter: blur(16px) saturate(1.4);
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    font-weight: 600;
+    pointer-events: none;
+  }
+
+  .radar__legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+
+  .radar__legend i {
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 99px;
+  }
+
+  .radar__legend i[data-tone="active"] { background: var(--status-active); }
+  .radar__legend i[data-tone="upcoming"] { background: var(--status-upcoming); }
+  .radar__legend i[data-tone="ended"] { background: var(--pin-ended); }
+
+  .radar__map-wrap .maplibregl-ctrl-top-right {
+    top: 0.25rem;
+    right: 0.25rem;
+  }
+
+  .radar__map-wrap .maplibregl-ctrl-group {
+    overflow: hidden;
+    border-radius: 0.75rem;
+    background: var(--glass);
+    box-shadow: var(--shadow-glass);
+    backdrop-filter: blur(16px) saturate(1.4);
+  }
+
+  .radar__map-wrap .maplibregl-ctrl-group button + button {
+    border-top-color: var(--hairline);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not(.light) .radar__map-wrap .maplibregl-ctrl-group button .maplibregl-ctrl-icon {
+      filter: invert(1);
+    }
+  }
+
+  .maplibregl-cooperative-gesture-screen {
+    font-size: 0.85rem;
+  }
+
+  /* Map popup: a glass card with the same row as the list */
+  .radar-popup .maplibregl-popup-content {
+    padding: 0.3rem 0 0.75rem;
+    border-radius: 1.1rem;
+    background: var(--glass);
+    color: var(--text);
+    box-shadow: var(--shadow-glass);
+    backdrop-filter: blur(20px) saturate(1.5);
+    font-family: var(--font-sans);
+  }
+
+  .radar-popup .maplibregl-popup-tip {
+    display: none;
+  }
+
+  .radar-popup .radar-item {
     min-height: 0;
-    overflow: auto;
-    overscroll-behavior: contain;
-    -webkit-overflow-scrolling: touch;
+    padding: 0.65rem 2.4rem 0.45rem 1rem;
+  }
+
+  .radar-popup .radar-item:hover {
+    background: transparent;
+  }
+
+  .radar-popup .radar-item__meta {
+    white-space: normal;
+  }
+
+  .radar-popup .maplibregl-popup-close-button {
+    top: 0.45rem;
+    right: 0.45rem;
+    width: 1.6rem;
+    height: 1.6rem;
+    border-radius: 99px;
+    color: var(--text-muted);
+    font-size: 1.1rem;
+  }
+
+  .radar-popup .maplibregl-popup-close-button:hover {
+    background: var(--surface-2);
+  }
+
+  .radar-popup__link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 2.4rem;
+    margin: 0.25rem 1rem 0;
+    border-radius: 0.7rem;
+    background: var(--text);
+    color: var(--surface);
+    font-size: 0.84rem;
+    font-weight: 600;
+    text-decoration: none;
+  }
+
+  .radar-popup__link:hover {
+    opacity: 0.88;
+  }
+
+  /* Toolbar */
+  .radar__toolbar {
+    position: sticky;
+    top: var(--app-top-h);
+    z-index: 4;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 1.25rem;
+    background: color-mix(in oklch, var(--background) 88%, transparent);
+    backdrop-filter: blur(16px) saturate(1.3);
+  }
+
+  .seg {
+    display: inline-flex;
+    flex: 1;
+    min-width: 0;
+    padding: 3px;
+    border-radius: 0.8rem;
+    background: color-mix(in oklch, var(--text) 7%, transparent);
+  }
+
+  .seg__btn {
+    flex: 1;
+    min-width: 0;
+    min-height: 2.2rem;
+    padding: 0 0.5rem;
+    border: 0;
+    border-radius: 0.62rem;
+    background: transparent;
+    color: var(--text-muted);
+    font: 600 0.84rem/1 var(--font-sans);
+    letter-spacing: -0.01em;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+  }
+
+  .seg__btn:hover {
+    color: var(--text);
+  }
+
+  .seg__btn[aria-pressed="true"] {
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: 0 1px 2px rgb(16 17 20 / 0.12), 0 0 0 0.5px rgb(16 17 20 / 0.06);
+  }
+
+  .seg__btn:focus-visible {
+    outline-offset: -2px;
+  }
+
+  .select-pill {
+    position: relative;
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .select-pill select {
+    appearance: none;
+    min-height: 2.6rem;
+    max-width: 9.5rem;
+    padding: 0 2rem 0 0.85rem;
+    border: 0;
+    border-radius: 0.8rem;
+    background: color-mix(in oklch, var(--text) 7%, transparent);
+    background-image: none;
+    color: var(--text);
+    font: 600 0.84rem/1 var(--font-sans);
+    text-overflow: ellipsis;
+    cursor: pointer;
+  }
+
+  .select-pill select:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  .select-pill__icon {
+    position: absolute;
+    right: 0.65rem;
+    width: 0.9rem;
+    height: 0.9rem;
+    color: var(--text-muted);
+    pointer-events: none;
+  }
+
+  /* List: inset grouped cards */
+  .radar__list {
+    display: grid;
+    gap: 1.1rem;
+    min-height: 10rem;
+    padding: 0.5rem 0.75rem 1rem;
+  }
+
+  .radar__list .radar-group + .radar-group {
+    margin-top: 0;
+  }
+
+  .radar__list .radar-group__head {
+    position: static;
+    padding: 0 0.5rem 0.45rem;
+    background: none;
+    backdrop-filter: none;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    font-weight: 620;
+  }
+
+  .radar__list .radar-group__n {
+    background: none;
+    padding: 0;
+    min-width: 0;
+    color: var(--text-faint);
+  }
+
+  .radar__list .radar-group[data-group="active"] .radar-group__n {
+    background: none;
+    color: var(--status-active);
+  }
+
+  .radar__list .radar-group[data-group="next7"] .radar-group__n,
+  .radar__list .radar-group[data-group="upcoming"] .radar-group__n {
+    background: none;
+    color: var(--status-upcoming);
+  }
+
+  .radar__list .radar-group {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .radar__list .radar-group > .radar-item:first-of-type {
+    border-top-left-radius: 1rem;
+    border-top-right-radius: 1rem;
+  }
+
+  .radar__list .radar-group > .radar-item {
+    background: var(--surface);
+  }
+
+  .radar__list .radar-group > .radar-item:last-of-type {
+    border-bottom-left-radius: 1rem;
+    border-bottom-right-radius: 1rem;
+  }
+
+  .radar__list .radar-group > .radar-item:first-of-type {
+    box-shadow: 0 -1px 0 var(--hairline);
+  }
+
+  .radar__list .radar-group > .radar-item:hover {
+    background: color-mix(in oklch, var(--surface) 70%, var(--surface-2));
+  }
+
+  .radar__list .radar-group > .radar-item.is-selected {
+    background: var(--accent-soft);
+  }
+
+  .radar__list .radar-group {
+    filter: drop-shadow(0 1px 1px rgb(16 17 20 / 0.04));
+  }
+
+  .radar__list .radar-group:has(> .radar-item) > .radar-item {
+    border-left: 1px solid var(--hairline);
+    border-right: 1px solid var(--hairline);
+  }
+
+  .radar__list .radar-group > .radar-item:last-of-type {
+    border-bottom: 1px solid var(--hairline);
+  }
+
+  .radar__list .radar-group > .radar-item:first-of-type {
+    border-top: 1px solid var(--hairline);
+    box-shadow: none;
+  }
+
+  .radar-group__more {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin: 0.5rem 0.5rem 0;
+    padding: 0.25rem 0;
+    border: 0;
+    background: none;
+    color: var(--accent-text);
+    font: 600 0.82rem/1.2 var(--font-sans);
+    cursor: pointer;
+  }
+
+  .radar-group__more::after {
+    content: "→";
+  }
+
+  .radar-group__more:hover {
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
   }
 
   .radar__more-wrap {
-    padding: 0.6rem 1rem 0;
+    padding: 0 1.25rem 0.75rem;
   }
 
   .radar__more-wrap:has([hidden]) {
     display: none;
   }
 
-  .radar__panel-foot {
-    display: grid;
-    gap: 0.15rem;
-    padding: 0.55rem 1rem calc(0.65rem + env(safe-area-inset-bottom, 0px));
-    border-top: 1px solid var(--hairline);
-    flex-shrink: 0;
+  .btn-quiet {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 2.75rem;
+    padding: 0 1rem;
+    border: 0;
+    border-radius: 0.85rem;
+    background: color-mix(in oklch, var(--text) 7%, transparent);
+    color: var(--text);
+    font: 600 0.85rem/1 var(--font-sans);
+    cursor: pointer;
   }
 
-  .radar__note {
-    margin: 0;
-  }
-
-  .radar__foot-disclaimer {
-    margin: 0;
-    color: var(--text-faint);
-    font-size: 0.7rem;
+  .btn-quiet:hover {
+    background: color-mix(in oklch, var(--text) 11%, transparent);
   }
 
   .radar__empty {
     margin: 0;
-    padding: 1.25rem 1rem;
+    padding: 2rem 1rem;
+    border-radius: 1rem;
+    background: var(--surface);
     color: var(--text-muted);
-    font-size: 0.9rem;
+    font-size: 0.92rem;
     line-height: 1.5;
+    text-align: center;
   }
 
-  .radar__ghost {
-    border: 1px solid var(--hairline);
-    border-radius: 6px;
-    background: var(--surface);
-    padding: 0.3rem 0.7rem;
-    cursor: pointer;
+  .radar__empty .btn-quiet {
+    width: auto;
+    margin-top: 0.75rem;
   }
 
   .radar-skel {
-    height: 3.25rem;
-    margin: 0.5rem 1rem;
-    border-radius: 8px;
+    height: 3.5rem;
+    border-radius: 1rem;
     background: linear-gradient(90deg, var(--surface-2), var(--surface), var(--surface-2));
     background-size: 200% 100%;
     animation: radar-shimmer 1.1s linear infinite;
@@ -1045,237 +1343,197 @@ const views = ["now", "planned", "history"] as const;
     to { background-position: -200% 0; }
   }
 
+  /* About + FAQ */
   .radar-about {
-    margin-top: 1.25rem;
-    padding: 1rem 1rem 1.25rem;
+    margin: 0.75rem 1.25rem 0;
+    padding: 1.25rem 0 0.5rem;
     border-top: 1px solid var(--hairline);
     color: var(--text-muted);
-    font-size: 0.84rem;
+    font-size: 0.86rem;
     line-height: 1.55;
   }
 
   .radar-about h2,
   .radar-about h3 {
-    margin: 0 0 0.4rem;
+    margin: 0 0 0.45rem;
     color: var(--text);
-    font-size: 0.86rem;
-    font-weight: 620;
+    font-size: 0.95rem;
+    font-weight: 650;
   }
 
   .radar-about h3 {
-    margin-top: 1rem;
+    margin-top: 1.25rem;
   }
 
   .radar-about p {
-    margin: 0 0 0.6rem;
+    margin: 0 0 0.8rem;
   }
 
   .radar-about__links {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.35rem;
+    gap: 0.4rem;
     margin: 0;
     padding: 0;
     list-style: none;
   }
 
   .radar-about__links a {
-    display: inline-block;
-    padding: 0.25rem 0.55rem;
-    border: 1px solid var(--hairline);
-    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    min-height: 2.3rem;
+    padding: 0 0.9rem;
+    border-radius: 99px;
+    background: color-mix(in oklch, var(--text) 7%, transparent);
     color: var(--text);
-    font-size: 0.78rem;
+    font-size: 0.82rem;
+    font-weight: 600;
     text-decoration: none;
   }
 
   .radar-about__links a:hover {
-    background: var(--surface-2);
+    background: color-mix(in oklch, var(--text) 11%, transparent);
   }
 
   .radar-about details {
     border-top: 1px solid var(--hairline);
   }
 
+  .radar-about details:last-child {
+    border-bottom: 1px solid var(--hairline);
+  }
+
   .radar-about summary {
-    padding: 0.55rem 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    min-height: 2.9rem;
+    padding: 0.5rem 0;
     color: var(--text);
-    font-weight: 550;
+    font-weight: 580;
     cursor: pointer;
+    list-style: none;
   }
 
-  .radar__sheet {
-    position: absolute;
-    z-index: 7;
-    left: 0.75rem;
-    right: 0.75rem;
-    bottom: calc(var(--app-dock-h) + 3.75rem);
-    padding: 0.5rem 0.5rem 0.75rem;
-    border: 1px solid var(--hairline);
-    border-radius: calc(var(--radius) + 2px);
-    background: var(--surface);
-    box-shadow: var(--shadow-float);
-    animation: sheet-in 0.25s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  .radar-about summary::-webkit-details-marker {
+    display: none;
   }
 
-  .radar__sheet .radar-item {
-    border-top: 0;
-    padding-right: 2.75rem;
+  .radar-about summary::after {
+    content: "+";
+    flex: none;
+    color: var(--text-faint);
+    font-size: 1.15rem;
+    font-weight: 400;
   }
 
-  .radar__sheet .mt-3 {
-    margin: 0.5rem 0.5rem 0;
-    width: calc(100% - 1rem);
+  .radar-about details[open] summary::after {
+    content: "–";
   }
 
-  @keyframes sheet-in {
-    from { opacity: 0; transform: translateY(8px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  .radar__sheet[hidden] {
-    display: none !important;
-  }
-
-  .radar__sheet-x {
-    position: absolute;
-    top: 0.4rem;
-    right: 0.4rem;
-    z-index: 1;
-  }
-
-  .radar__fab {
-    position: absolute;
-    z-index: 6;
-    right: 0.9rem;
-    bottom: calc(var(--app-dock-h) + 0.9rem);
-    box-shadow: var(--shadow-float);
-  }
-
-  .radar__fab[hidden] {
-    display: none !important;
-  }
-
-  .radar__fab b {
-    min-width: 1.5rem;
-    padding: 0.12rem 0.45rem;
-    border-radius: 4px;
-    background: rgb(255 255 255 / 0.18);
-    font-size: 0.72rem;
-    font-weight: 620;
-    font-variant-numeric: tabular-nums;
-  }
-
-  @media (max-width: 419px) {
-    /* Give the search field the room; the dock already says where we are. */
-    .radar__brand { display: none; }
-    .radar__hud-bar { grid-template-columns: minmax(0, 1fr) auto; }
+  .radar__disclaimer {
+    margin: 0.75rem 1.25rem calc(var(--app-dock-h) + env(safe-area-inset-bottom, 0px) + 1.5rem);
+    color: var(--text-faint);
+    font-size: 0.75rem;
+    line-height: 1.45;
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .radar__panel { transition: none; }
-    .radar-skel, #radar-refresh.is-spinning svg { animation: none; }
+    .radar-skel, #radar-refresh.is-spinning svg, .live-chip i { animation: none; }
   }
 
-  @media (min-width: 900px) {
-    body.shell-radar .app-top--radar-desktop-only {
+  /* ───────────── desktop: map is the stage, the panel floats on glass */
+  @media (min-width: 960px) {
+    body.shell-radar {
+      height: 100dvh;
+      overflow: hidden;
+    }
+
+    body.shell-radar .app-frame {
+      height: 100dvh;
+      max-height: 100dvh;
+      overflow: hidden;
+    }
+
+    body.shell-radar .app-main--radar {
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
       display: flex;
-      flex-shrink: 0;
+      flex-direction: column;
     }
 
     .radar {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(23rem, 27rem);
-      grid-template-rows: auto minmax(0, 1fr);
-      grid-template-areas:
-        "map hud"
-        "map panel";
+      display: block;
+      flex: 1;
+      min-height: 0;
       height: 100%;
-      max-height: 100%;
-    }
-
-    .radar__hud {
-      grid-area: hud;
-      padding: 0.75rem 1rem 0.6rem;
-      background: var(--surface);
-      border-bottom: 1px solid var(--hairline);
-    }
-
-    .radar__hud-bar {
-      grid-template-columns: minmax(0, 1fr);
-      padding: 0;
-      border: 0;
-      border-radius: 0;
-      background: transparent;
-      box-shadow: none;
-      backdrop-filter: none;
-    }
-
-    .radar__brand,
-    .radar__handle,
-    .radar__hud-bar .app-langs--hud {
-      display: none;
-    }
-
-    .radar__kbd {
-      display: inline-block;
-    }
-
-    .radar__filters {
-      flex-wrap: wrap;
-      margin-top: 0.6rem;
-      overflow: visible;
     }
 
     .radar__map-wrap {
-      position: relative;
-      grid-area: map;
-      min-height: 0;
-      border-right: 1px solid var(--hairline);
+      position: absolute;
+      inset: 0;
+      height: auto;
+    }
+
+    .radar__side {
+      position: absolute;
+      top: 0.9rem;
+      left: 0.9rem;
+      bottom: 0.9rem;
+      width: var(--panel-w);
+      margin: 0;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      border-radius: 1.4rem;
+      background: color-mix(in oklch, var(--background) 82%, transparent);
+      box-shadow: var(--shadow-glass);
+      backdrop-filter: blur(28px) saturate(1.6);
+      scrollbar-width: thin;
+    }
+
+
+    .radar__intro {
+      padding: 1.15rem 1.35rem 1.1rem;
+    }
+
+    .radar__toolbar {
+      top: 0;
+      padding: 0.65rem 1.35rem;
+      background: color-mix(in oklch, var(--background) 70%, transparent);
+      backdrop-filter: blur(20px) saturate(1.4);
+    }
+
+    .radar__list {
+      padding-inline: 0.85rem;
+    }
+
+    .search-field__kbd {
+      display: inline-block;
     }
 
     .radar__legend {
-      display: flex;
+      top: auto;
+      left: auto;
+      right: 1rem;
+      bottom: 2.4rem;
+      padding: 0.45rem 0.85rem;
+      font-size: 0.75rem;
+    }
+
+    .radar__map-wrap .maplibregl-ctrl-top-right {
+      top: 0.65rem;
+      right: 0.65rem;
+    }
+
+    .radar-about,
+    .radar__disclaimer {
+      margin-inline: 1.35rem;
     }
 
     .radar__disclaimer {
-      display: block;
-      position: absolute;
-      left: 0.75rem;
-      bottom: 2.75rem;
-      z-index: 3;
-      max-width: 17rem;
-      margin: 0;
-      padding: 0.45rem 0.65rem;
-      border-radius: var(--radius);
-      background: color-mix(in oklch, var(--surface) 92%, transparent);
-      color: var(--text-muted);
-      font-size: 0.7rem;
-      line-height: 1.4;
-      pointer-events: none;
-    }
-
-    .radar__foot-disclaimer {
-      display: none;
-    }
-
-    .radar__panel {
-      grid-area: panel;
-      position: relative;
-      max-height: none;
-      height: 100%;
-      min-height: 0;
-      transform: none;
-      border-top: 0;
-      border-radius: 0;
-      box-shadow: none;
-      transition: none;
-    }
-
-    .radar__panel-close,
-    .radar__fab,
-    .radar__sheet {
-      display: none !important;
+      margin-bottom: 1.5rem;
     }
   }
 </style>

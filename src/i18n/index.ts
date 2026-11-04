@@ -2,6 +2,7 @@ import i18next from "i18next";
 import { de, fr } from "./catalogs";
 import { en, it } from "./catalogs-it-en";
 import { dataDe, dataEn, dataFr, dataIt } from "./catalog-data";
+import { uiDe, uiEn, uiFr, uiIt } from "./catalog-ui";
 import { DATE_LOCALE, EVENT_STEM, localePrefix, type AppLocale } from "./locales";
 import type { RadarCopy } from "../radar-view";
 
@@ -11,10 +12,10 @@ void i18n.init({
   lng: "de",
   fallbackLng: "de",
   resources: {
-    de: { translation: { ...de, data: dataDe } },
-    fr: { translation: { ...fr, data: dataFr } },
-    it: { translation: { ...it, data: dataIt } },
-    en: { translation: { ...en, data: dataEn } }
+    de: { translation: { ...de, data: dataDe, ui: uiDe } },
+    fr: { translation: { ...fr, data: dataFr, ui: uiFr } },
+    it: { translation: { ...it, data: dataIt, ui: uiIt } },
+    en: { translation: { ...en, data: dataEn, ui: uiEn } }
   },
   interpolation: { escapeValue: false },
   returnNull: false,
@@ -91,8 +92,25 @@ export function radarViewCopy(locale: AppLocale): RadarCopy {
       reported: r("time.reported", { relative: "{{relative}}" }),
       endedAt: r("time.endedAt", { date: "{{date}}" }),
       window: r("time.window", { start: "{{start}}", end: "{{end}}" }),
-      lasted: r("time.lasted", { duration: "{{duration}}" })
+      lasted: r("time.lasted", { duration: "{{duration}}" }),
+      until: t(locale, "ui.row.until", { time: "{{time}}" })
     },
+    state: {
+      active: t(locale, "ui.status.active"),
+      upcoming: t(locale, "ui.status.upcoming"),
+      ended: t(locale, "ui.status.ended")
+    },
+    kind: {
+      planned: t(locale, "nature.plannedList"),
+      unplanned: t(locale, "nature.unplannedKind")
+    },
+    tiles: {
+      activeOne: t(locale, "ui.home.activeLabel", { count: 1 }),
+      activeOther: t(locale, "ui.home.activeLabel", { count: 2 }),
+      plannedOne: t(locale, "ui.home.plannedLabel", { count: 1 }),
+      plannedOther: t(locale, "ui.home.plannedLabel", { count: 2 })
+    },
+    historyLink: t(locale, "ui.home.historyLink"),
     countOne: r("count", { count: 1 }).replace("1", "{{count}}"),
     countOther: r("count", { count: 2 }).replace("2", "{{count}}"),
     empty: {
