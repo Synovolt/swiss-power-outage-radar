@@ -342,7 +342,9 @@ export function computePublicStats(
     }
   }
 
-  const firstMs = Math.min(...past.map((row) => dbTimeMs(row.sort_at)).filter(Number.isFinite));
+  // "Since" means since the radar observed something, not the oldest date an
+  // archived report mentions (one source reports an outage from 2008).
+  const firstMs = Math.min(...rows.map((row) => dbTimeMs(row.received_at)).filter(Number.isFinite));
   return {
     v: 1,
     generatedAt: new Date(now).toISOString(),

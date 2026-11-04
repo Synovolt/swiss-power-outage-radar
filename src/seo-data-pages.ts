@@ -345,7 +345,8 @@ export function buildPlacePage(input: PlacePageInput, locale: AppLocale, now = D
   const p = (key: string, options?: Record<string, unknown>) => t(locale, `data.place.${key}`, { place: input.name, ...options });
   const canton = input.canton ? cantonByCode(input.canton) : null;
   const cantonName = canton?.names[locale] ?? null;
-  const cantonSuffix = cantonName ? ` (${cantonName})` : "";
+  // "Luzern (Luzern)" says nothing; only add the canton when it differs from the place.
+  const cantonSuffix = cantonName && cantonName.toLowerCase() !== input.name.toLowerCase() ? ` (${cantonName})` : "";
   const trailEntries: Array<{ label: string; href?: string }> = [{ label: t(locale, "data.nav.places"), href: pathFor({ kind: "places" }, locale) }];
   if (canton) trailEntries.push({ label: canton.names[locale], href: cantonHref(canton, locale) });
   trailEntries.push({ label: input.name });

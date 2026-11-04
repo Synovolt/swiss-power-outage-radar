@@ -692,7 +692,7 @@ export async function summarizePublicSlice(
               SUM(p.nature = 'unplanned') AS unplanned,
               SUM(julianday(p.sort_at) >= julianday('now', '-30 days') AND p.sort_bucket = 1) AS last30,
               MAX(CASE WHEN p.sort_bucket = 1 THEN p.sort_at END) AS last_at,
-              MIN(p.sort_at) AS first_at
+              MIN(p.received_at) AS first_at
        FROM ${from} ${clause}`
     ).bind(...binds).first<Record<string, number | string | null>>(),
     db.prepare(

@@ -147,7 +147,8 @@ describe("computePublicStats", () => {
       places: 2,
       withCanton: 4
     });
-    expect(stats.firstAt).toBe("2026-06-01T20:00:00.000Z");
+    // "since" is the first observation (earliest received_at), not the oldest event date.
+    expect(stats.firstAt).toBe("2026-07-10T08:00:00.000Z");
     expect(stats.sources).toEqual({ monitored: 12, healthy: 10 });
   });
 
