@@ -162,7 +162,7 @@ outage.ch sammelt öffentlich zugängliche Meldungen von Verteilnetzbetreibern, 
 ## Wichtig für Zitate
 
 - Verbindlich ist immer der zuständige Verteilnetzbetreiber, nicht der Stromlieferant und nicht outage.ch.
-- Öffentlich wird nur, was eine offizielle Quelle oder mindestens zwei unabhängige glaubwürdige Quellen belegt.
+- Öffentlich wird nur, was eine offizielle Quelle oder mindestens zwei unabhängige glaubwürdige Quellen belegt, oder ein einzelner Medienbericht über einen konkreten Ausfall (gekennzeichnet als «Öffentlich gemeldet», höchstens 6 Stunden aktiv).
 - Ein Stromausfall ist lokal oder regional. Eine Strommangellage oder ein Blackout ist etwas anderes.
 - Bei Lebensgefahr, Feuer oder herunterhängenden Leitungen gelten 112 bzw. die offiziellen Alarmierungswege.
 

@@ -159,11 +159,15 @@ function requiresItemLevelAdapter(source: SourceRegistryEntry, config: AdapterCo
   return true;
 }
 
-function explicitLocation(text: string): string | null {
+// "in Betrieb genommen", "in Kürze", "in Absprache": capitalised nouns after "in" that are not places.
+const NOT_A_PLACE_START = /^(?:Betrieb|Kürze|Kuerze|Absprache|Zusammenarbeit|Folge|Ordnung|Arbeit|Bearbeitung|Abklärung|Abklaerung|Planung|Kraft|Teilen|Gebieten|Bezug|Richtung|Ausnahmefällen|Einzelfällen|Notfällen|Ihrem|Ihrer|Ihren|Unserem|Unserer)\b/;
+
+export function explicitLocation(text: string): string | null {
   const match = text.match(/(?:^|\s)(?:in|für|fuer|betroffen(?:e)?|commune de|à|a)\s+([A-ZÄÖÜ][A-Za-zÀ-ÿÄÖÜäöü' -]{2,60})/);
-  return match?.[1]
-    ? compact(match[1].replace(/\b(?:ist|sind|wurde|wurden|kam|kommt|seit|am|vom)\b.*$/i, ""))
-    : null;
+  if (!match?.[1] || NOT_A_PLACE_START.test(match[1])) return null;
+  // Cut at the first verb or function word: "Saanen kann es zu …" → "Saanen".
+  const place = compact(match[1].replace(/\s(?:ist|sind|wurde|wurden|wird|werden|kam|kommt|kann|können|koennen|muss|müssen|hat|haben|bleibt|gibt|es|zu|seit|am|vom|bis|ab|wegen|genommen)\b.*$/i, ""));
+  return place.length >= 2 ? place : null;
 }
 
 function likelyLocation(text: string, source: SourceRegistryEntry): string | null {

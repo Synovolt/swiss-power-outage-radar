@@ -266,6 +266,12 @@ function publicNature(event: OutageEvent, facts: OutageFact[]): NonNullable<Outa
 }
 
 export const ACTIVE_EVENT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+/**
+ * A single media report ("reported" trust) is rarely updated and often already
+ * describes a fixed outage. Without a new confirmation it stops counting as
+ * active after this long instead of a full day.
+ */
+export const REPORTED_EVENT_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 /** A planned window counts as over once its announced end lies this far in the past without a newer confirmation. */
 export const PLANNED_WINDOW_GRACE_MS = 30 * 60 * 1000;
 
@@ -314,7 +320,8 @@ export function toPublicFeedItem(
   );
   const lastConfirmedActiveAt = isoOrNull(event.last_confirmed_active_at ?? event.last_seen_at);
   const confirmationMs = lastConfirmedActiveAt ? new Date(lastConfirmedActiveAt).getTime() : activityReference;
-  const recentlyObserved = Number.isFinite(confirmationMs) && now - confirmationMs <= ACTIVE_EVENT_MAX_AGE_MS;
+  const maxActiveAge = decision.trust === "reported" ? REPORTED_EVENT_MAX_AGE_MS : ACTIVE_EVENT_MAX_AGE_MS;
+  const recentlyObserved = Number.isFinite(confirmationMs) && now - confirmationMs <= maxActiveAge;
   const autoClosed = !resolvedAt && !recentlyObserved &&
     (statusFact === "active" || statusFact === "aktiv" || (!statusFact && nature === "unplanned"));
   const status = nature === "planned" && Number.isFinite(startMs) && startMs > now

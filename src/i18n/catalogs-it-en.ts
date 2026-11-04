@@ -252,7 +252,7 @@ export const it: Catalog = {
       },
       "3": {
         q: "Come decide outage.ch quali segnalazioni sono pubbliche?",
-        a: "Un evento è pubblicato solo se esiste almeno una fonte ufficiale di rete o autorità, oppure almeno due fonti credibili indipendenti. Indizi isolati non confermati restano invisibili."
+        a: "Un evento è pubblicato solo se esiste almeno una fonte ufficiale di rete o autorità, oppure almeno due fonti credibili indipendenti. Un singolo articolo su un'interruzione concreta compare come «Segnalata pubblicamente» e resta attivo al massimo 6 ore. Gli altri indizi non confermati restano invisibili."
       },
       "4": {
         q: "outage.ch indica un orario preciso di ripristino?",
@@ -415,7 +415,7 @@ export const it: Catalog = {
     s1p1: "Ogni pagina pubblica di incidente indica luogo, tipo, stato, orari comprovati, causa se nota e le fonti originali.",
     s1p2: "Il radar in home raccoglie segnalazioni attuali, in programma, risolte e storiche. Le interruzioni programmate compaiono dopo l'inizio annunciato. Stime non comprovate di ripristino non sono presentate come fatti.",
     s2h: "Regola delle fonti",
-    s2p1: "Un evento è pubblicato solo se esiste almeno una fonte ufficiale di rete o autorità, oppure almeno due fonti credibili indipendenti. Un indizio mediatico o di allerta isolato resta interno.",
+    s2p1: "Un evento è pubblicato solo se esiste almeno una fonte ufficiale di rete o autorità, oppure almeno due fonti credibili indipendenti. Un singolo articolo di stampa compare solo se tratta concretamente di un'interruzione in un luogo preciso: è contrassegnato come «Segnalata pubblicamente» e resta attivo al massimo 6 ore senza nuova conferma. Le singole allerte restano interne.",
     s2p2: "I Google Alert servono alla scoperta, non come verità. Pagine dei gestori, carte dei guasti e canali ufficiali hanno priorità. Le pagine rilevanti sono archiviate internamente; visibile resta solo ciò che appartiene all'evento pubblicato.",
     s2p3: "Alertswiss è letto tramite il feed JSON pubblico, solo per allerte legate all'elettricità. Messaggi di test e altre situazioni come divieti di fuoco restano esclusi. outage.ch non riprende i testi integrali Alertswiss; la citazione è «Fonte: www.alertswiss.ch». I dati sono sotto CC BY-NC-SA 2.5 CH.",
     s3h: "Indicatori ElCom sulle pagine dei gestori",
@@ -686,7 +686,7 @@ export const en: Catalog = {
       },
       "3": {
         q: "How does outage.ch decide which reports are public?",
-        a: "An event is published only if there is at least one official grid or authority source, or at least two independent credible sources. Single unconfirmed tips stay invisible."
+        a: "An event is published only if there is at least one official grid or authority source, or at least two independent credible sources. A single media report about a concrete outage appears as “Publicly reported” and counts as active for at most 6 hours. Other unconfirmed tips stay invisible."
       },
       "4": {
         q: "Does outage.ch give an exact restoration time?",
@@ -849,7 +849,7 @@ export const en: Catalog = {
     s1p1: "Every public incident page names location, type, status, evidenced times, cause where known, and original sources.",
     s1p2: "The home radar gathers current, upcoming, restored and historical reports. Planned interruptions appear after their announced start. Unevidenced restoration estimates are not presented as facts.",
     s2h: "Source rule",
-    s2p1: "An event is published only if there is at least one official grid or authority source, or at least two independent credible sources. A single media or alert tip stays internal.",
+    s2p1: "An event is published only if there is at least one official grid or authority source, or at least two independent credible sources. A single media report only appears if it is concretely about an outage at a specific place: it is labelled “Publicly reported” and counts as active for at most 6 hours without a new confirmation. Single alert tips stay internal.",
     s2p2: "Google Alerts are for discovery, not truth. Direct operator pages, outage maps and authority channels take priority. Relevant pages are archived internally; only what belongs to the published event is public.",
     s2p3: "Alertswiss is read via the public JSON feed, but only for electricity-related warnings. Test messages and other situations such as fire bans stay out. outage.ch does not republish full Alertswiss texts; the citation is “Source: www.alertswiss.ch”. The data is under CC BY-NC-SA 2.5 CH.",
     s3h: "ElCom figures on operator pages",

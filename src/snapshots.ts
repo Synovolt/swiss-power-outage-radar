@@ -1,5 +1,6 @@
 import { summarizeSourceForPublic } from "./ai";
 import { insertSourceSnapshot, updateSourceSnapshotDigest } from "./db";
+import { stripPageMetadata } from "./source-text";
 import type { Env, OutageEvent, OutageSource, SourceSnapshot, StoredAlertItem } from "./types";
 
 interface SnapshotTarget {
@@ -41,7 +42,7 @@ function decodeScreenshot(value: unknown): Uint8Array | null {
 }
 
 function excerpt(markdown: string): string {
-  return markdown
+  return stripPageMetadata(markdown)
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 1200);

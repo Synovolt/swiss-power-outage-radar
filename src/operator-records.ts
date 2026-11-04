@@ -240,7 +240,10 @@ export function extractPrimeoRecords(payload: unknown, observedAt: string): Reco
       const start = isoOrNull(row.from);
       const end = isoOrNull(row.to);
       const planned = row.status === "PLANNED";
-      const { place, detail } = splitPlaceDetail(row.title);
+      const split = splitPlaceDetail(row.title);
+      const place = swissPlacesOnly(split.place);
+      const detail = split.detail;
+      if (split.place && !place) continue; // only French communes
       // Primeo files announced works under "done" before they happen, so a
       // planned item's state comes from its window, not from the list.
       const operatorState: OperatorState = planned
@@ -387,11 +390,49 @@ const POWER_WORDS = /\b(?:strom|elektri|electri|courant|corrente|energia elettri
 const NON_POWER_WORDS = /\b(?:\w*beleuchtung|[ée]clairage public|illuminazione pubblica|fernw[aä]rme\w*|w[aä]rmeverbund|w[aä]rmeversorgung|w[aä]rmenetz\w*|wasserversorgung|trinkwasser|wasserleitung|abwasser|erdgas|gasversorgung|gasleitung|chauffage [aà] distance|eau potable|acqua potabile|teleriscaldamento|glasfaser|internet|tv)\b/i;
 const SPARTE = /\b(?:sparte|branche|secteur|settore)\s*:\s*([\p{L} ]+)/iu;
 
-/** Utility filter: district heating, water or gas works are not power outages. */
+const NON_POWER_WORDS_ALL = new RegExp(NON_POWER_WORDS.source, "gi");
+const LIGHTING_WORDS = /\w*beleuchtung|[ée]clairage public|illuminazione pubblica/i;
+/** Words that only fit an interruption of the household supply, not of street lights. */
+const SUPPLY_OUTAGE_WORDS = /\b(?:stromausfall|stromausf[aä]lle|stromunterbruch|stromunterbr[uü]che|versorgungsunterbruch|unterbruch der stromversorgung|panne de courant|pannes de courant|coupure de courant|coupures de courant|interruzion[ei] (?:di|della) corrente|blackout)\b/i;
+
+/** Utility filter: district heating, water, gas works or street lighting are not power outages. */
 export function isNonElectricNotice(text: string): boolean {
   const sparte = text.match(SPARTE)?.[1];
   if (sparte) return !POWER_WORDS.test(sparte);
-  return NON_POWER_WORDS.test(text) && !POWER_WORDS.test(text.replace(NON_POWER_WORDS, " "));
+  // "Ausfällen der Strassen- und Quartierbeleuchtung" mentions electricity
+  // ("Stromnetz", "Strom") without any household losing power.
+  if (LIGHTING_WORDS.test(text) && !SUPPLY_OUTAGE_WORDS.test(text)) return true;
+  return NON_POWER_WORDS.test(text) && !POWER_WORDS.test(text.replace(NON_POWER_WORDS_ALL, " "));
+}
+
+/**
+ * French communes in Primeo's grid around Saint-Louis (Alsace). outage.ch
+ * covers Switzerland only, so these records are dropped.
+ */
+const FRENCH_PRIMEO_COMMUNES = new Set([
+  "leymen", "folgensbourg", "hesingue", "liebenswiller", "liebenswiler", "hegenheim", "hagenthal-le-bas",
+  "hagenthal-le-haut", "neuwiller", "wentzwiller", "buschwiller", "attenschwiller", "michelbach-le-bas",
+  "michelbach-le-haut", "knoeringue", "ranspach-le-bas", "ranspach-le-haut", "saint-louis", "huningue",
+  "village-neuf", "blotzheim", "hesingue", "oltingue", "wolschwiller", "biederthal", "linsdorf", "kiffis"
+]);
+
+function communeKey(name: string): string {
+  return name.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim().replace(/\s+/g, "-");
+}
+
+/** Places of a comma/"und"-separated list that lie in France ("-le-Bas"/"-le-Haut" or known Primeo communes). */
+export function isFrenchPlace(name: string): boolean {
+  const key = communeKey(name);
+  return FRENCH_PRIMEO_COMMUNES.has(key) || /-le-(?:bas|haut)$/.test(key);
+}
+
+/** Keeps only the Swiss places of a place list; null when none is left. */
+export function swissPlacesOnly(place: string | null): string | null {
+  if (!place) return null;
+  const parts = place.split(/\s*,\s*|\s+und\s+|\s+et\s+/i).map((part) => part.trim()).filter(Boolean);
+  const swiss = parts.filter((part) => !isFrenchPlace(part));
+  if (swiss.length === parts.length) return place;
+  return swiss.length ? swiss.join(", ") : null;
 }
 
 const PLANNED_WORDS = /\b(?:geplant\w*|planifi\w*|pianificat\w*|programmat\w*|unterhalt|wartung|travaux|lavori|bauarbeiten)\b/i;

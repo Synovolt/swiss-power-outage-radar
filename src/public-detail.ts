@@ -4,6 +4,8 @@ import { getOutageEvent, getOutageEventFacts, getOutageEventSnapshots, getOutage
 import { getPublicItem } from "./public-projection";
 import { evidenceScreenshotKey } from "./snapshots";
 import { operatorHostnames, operatorProfileUrl, resolveOperatorProfile } from "./operators";
+import { stripPageMetadata } from "./source-text";
+import { cantonByName } from "./swiss-cantons";
 import type { Env, OutageEvent, OutageFact, OutageSource, PublicFeedItem, SourceSnapshot } from "./types";
 
 export interface GeoAdminSearchResult {
@@ -99,9 +101,25 @@ export function publicLocationQuery(value: string | null | undefined): string {
   return genericFirst ? parts[1] : parts[0];
 }
 
+/**
+ * Further places to try when the first part of a location is not on the map,
+ * e.g. a venue: "Schachenhalle, Aarau, Aargau" → "Aarau". Canton names are
+ * context, not places.
+ */
+export function fallbackLocationQueries(value: string | null | undefined): string[] {
+  const primary = publicLocationQuery(value);
+  return (value ?? "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => part && part !== primary && !cantonByName(part) && !/^(?:schweiz|suisse|svizzera|switzerland)$/i.test(part))
+    .slice(0, 1);
+}
+
 function plainLabel(value: string | undefined): string {
   return (value ?? "")
     .replace(/<[^>]*>/g, "")
+    // Gazetteer labels append "# <PLZ> <locality>": internal, not a place name.
+    .replace(/\s*#.*$/, "")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -132,8 +150,10 @@ export function choosePublicLocation(
       const overlap = [...queryTokens].filter((token) => (` ${detail} `).includes(` ${token} `)).length;
       const originBonus = result.attrs.origin === "gg25" ? 30 : result.attrs.origin === "address" ? 24 : result.attrs.origin === "gazetteer" ? 16 : 8;
       const rankPenalty = Math.min(20, Number(result.attrs.rank ?? 10));
-      return { result, score: overlap * 50 + originBonus + Number(result.weight ?? 0) / 10 - rankPenalty };
+      return { result, overlap, score: overlap * 50 + originBonus + Number(result.weight ?? 0) / 10 - rankPenalty };
     })
+    // A result sharing no word with the query is another place (e.g. "Schachenhalle" → Trubschachen).
+    .filter((candidate) => queryTokens.size === 0 || candidate.overlap > 0)
     .filter((candidate) => candidate.score >= 40)
     .sort((a, b) => b.score - a.score);
 
@@ -251,7 +271,8 @@ const SOURCE_FACT_ORDER: OutageFact["fact_type"][] = [
 ];
 
 function conciseExcerpt(value: string | null | undefined, maxLength = 320): string | null {
-  const cleaned = (value ?? "").replace(/\s+/g, " ").trim();
+  // Excerpts stored before metadata stripping existed still carry the header.
+  const cleaned = stripPageMetadata(value).replace(/\s+/g, " ").trim();
   if (!cleaned) return null;
   if (cleaned.length <= maxLength) return cleaned;
   const shortened = cleaned.slice(0, maxLength);
@@ -504,20 +525,33 @@ export async function resolvePublicEventLocation(
   if (cached?.query === query) return cached;
   if (await cachedPublicLocationMiss(db, event.id, query)) return null;
   try {
-    const url = new URL("https://api3.geo.admin.ch/rest/services/ech/SearchServer");
-    url.searchParams.set("searchText", query);
-    url.searchParams.set("type", "locations");
-    url.searchParams.set("limit", "8");
-    const response = await fetcher(url, {
-      headers: { Accept: "application/json" },
-      signal: AbortSignal.timeout(2500)
-    });
-    if (!response.ok) {
+    const search = async (searchText: string): Promise<PublicEventLocation | null | "error"> => {
+      const url = new URL("https://api3.geo.admin.ch/rest/services/ech/SearchServer");
+      url.searchParams.set("searchText", searchText);
+      url.searchParams.set("type", "locations");
+      url.searchParams.set("limit", "8");
+      const response = await fetcher(url, {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(2500)
+      });
+      if (!response.ok) return "error";
+      const payload = await response.json() as { results?: GeoAdminSearchResult[] };
+      return choosePublicLocation(searchText, payload.results ?? []);
+    };
+    let found = await search(query);
+    if (found === null) {
+      // One extra lookup at most, and the cache stays keyed by the primary query.
+      const [fallback] = fallbackLocationQueries(event.location_text);
+      if (fallback) {
+        const second = await search(fallback);
+        found = second && second !== "error" ? { ...second, query } : second;
+      }
+    }
+    if (found === "error") {
       await cachePublicLocationMiss(db, event.id, query);
       return null;
     }
-    const payload = await response.json() as { results?: GeoAdminSearchResult[] };
-    const location = choosePublicLocation(query, payload.results ?? []);
+    const location = found;
     if (!location) {
       await cachePublicLocationMiss(db, event.id, query);
       return null;
