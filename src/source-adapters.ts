@@ -861,6 +861,278 @@ async function parseAilHtml(
   return { observations, schemaMatched: true };
 }
 
+/** Month names without diacritics ("März" → "marz", "août" → "aout"). */
+const MONTH_NUMBERS: Record<string, number> = {
+  januar: 1, janner: 1, februar: 2, marz: 3, maerz: 3, april: 4, mai: 5, juni: 6, juli: 7, august: 8,
+  september: 9, oktober: 10, november: 11, dezember: 12,
+  gennaio: 1, febbraio: 2, marzo: 3, aprile: 4, maggio: 5, giugno: 6, luglio: 7, agosto: 8,
+  settembre: 9, ottobre: 10, dicembre: 12,
+  janvier: 1, fevrier: 2, mars: 3, avril: 4, juin: 6, juillet: 7, aout: 8, septembre: 9,
+  octobre: 10, novembre: 11, decembre: 12
+};
+
+/** Rewrites "21. August 2025" / "5 ottobre 2026" as "21.08.2025" so one numeric parser covers all notices. */
+function normalizeLongDates(text: string): string {
+  return text.replace(/\b(\d{1,2})\.?\s+([A-Za-zÀ-ÿ]+)\s+(\d{4})\b/g, (full, day: string, month: string, year: string) => {
+    const number = MONTH_NUMBERS[month.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")];
+    return number ? `${day.padStart(2, "0")}.${String(number).padStart(2, "0")}.${year}` : full;
+  });
+}
+
+/**
+ * Start and end of a notice written as prose: "il 05.11.2026 dalle ore 14.00
+ * alle ore 15.30", "dal 05.11.2026 ore 22.00 al 06.11.2026 ore 05.00",
+ * "21.08.2025, 14:10 Uhr". A time binds to the latest date before it; an end
+ * earlier than the start on the same day runs past midnight. `firstDayMs` is
+ * the first date at Swiss midnight, for notices that give no time at all.
+ */
+function parseNoticeInterval(text: string): { startedAt: string | null; resolvedAt: string | null; firstDayMs: number | null } {
+  const tokens = normalizeLongDates(compact(text)).matchAll(/(\d{1,2})\.(\d{1,2})\.(\d{4})|(?<![\d.:])(\d{1,2})[:.](\d{2})(?![\d.:])/g);
+  let date: { year: number; month: number; day: number } | null = null;
+  let firstDayMs: number | null = null;
+  const points: string[] = [];
+  for (const token of tokens) {
+    if (token[1]) {
+      date = { year: Number(token[3]), month: Number(token[2]), day: Number(token[1]) };
+      if (firstDayMs === null) {
+        const midnight = swissWallClockToIso(date.year, date.month, date.day, 0, 0);
+        firstDayMs = midnight ? Date.parse(midnight) : null;
+      }
+      continue;
+    }
+    const hour = Number(token[4]);
+    const minute = Number(token[5]);
+    if (!date || hour > 23 || minute > 59) continue;
+    const iso = swissWallClockToIso(date.year, date.month, date.day, hour, minute);
+    if (iso) points.push(iso);
+    if (points.length === 2) break;
+  }
+  const startedAt = points[0] ?? null;
+  let resolvedAt = points[1] ?? null;
+  if (startedAt && resolvedAt && Date.parse(resolvedAt) <= Date.parse(startedAt)) {
+    resolvedAt = new Date(Date.parse(resolvedAt) + 24 * 60 * 60 * 1000).toISOString();
+  }
+  return { startedAt, resolvedAt, firstDayMs };
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** Notices that stay on a page long after the fact are not news any more. */
+const STALE_NOTICE_MS = 7 * DAY_MS;
+
+/** Planned work is over once its end has passed (or a day after a start without end). */
+function scheduledNoticeStatus(startedAt: string | null, resolvedAt: string | null, observedMs: number): CanonicalObservationStatus {
+  if (resolvedAt) return Date.parse(resolvedAt) <= observedMs ? "resolved" : "planned";
+  if (startedAt && observedMs - Date.parse(startedAt) > DAY_MS) return "resolved";
+  return "planned";
+}
+
+/**
+ * AIM (Mendrisio) "Interruzioni programmate": one card per notice with a
+ * clock line (when) and a pin line (quartiere, streets). The list also
+ * carries road and pipe works; only electricity interruptions are kept.
+ */
+async function parseAimMendrisioHtml(
+  source: SourceRegistryEntry,
+  html: string,
+  observedAt: string
+): Promise<KnownAdapterPayload> {
+  if (!/class="program-list"/.test(html)) return { observations: [], schemaMatched: false };
+  const observedMs = Date.parse(observedAt);
+  const observations: SourceObservationInput[] = [];
+  for (const block of extractClassBlocks(html, "a", "card-program")) {
+    const card = block.slice(0, block.indexOf("</a>") >= 0 ? block.indexOf("</a>") : block.length);
+    const heading = compact(stripHtml(card.match(/<h3\b[^>]*>([\s\S]*?)<\/h3>/i)?.[1] ?? ""));
+    if (!/energia elettrica|elettricit|corrente/i.test(heading)) continue;
+    const paragraphs = [...card.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)].map((match) => match[1] ?? "");
+    const when = compact(stripHtml(paragraphs.find((paragraph) => /fa-clock/.test(paragraph)) ?? ""));
+    const where = compact(stripHtml(paragraphs.find((paragraph) => /fa-location/.test(paragraph)) ?? ""));
+    const interval = parseNoticeInterval(when);
+    if (!interval.startedAt && interval.firstDayMs === null) continue;
+    const lastKnownMs = interval.resolvedAt ? Date.parse(interval.resolvedAt) : interval.firstDayMs;
+    if (lastKnownMs !== null && observedMs - lastKnownMs > STALE_NOTICE_MS) continue;
+    const quartiere = compact(where.split(",")[0] ?? "") || compact(heading.match(/quartiere di\s+(.+)$/i)?.[1] ?? "") || "Mendrisio";
+    const status = scheduledNoticeStatus(interval.startedAt, interval.resolvedAt, observedMs);
+    const title = `Interruzione di corrente pianificata a ${quartiere}`;
+    const href = card.match(/\bhref="([^"]+)"/i)?.[1];
+    observations.push(await makeKnownObservation(source, {
+      status,
+      title,
+      text: compact(`${title}. ${when ? `Quando: ${when}.` : ""} ${where ? `Zona: ${where}.` : ""}`),
+      location: quartiere,
+      observedAt,
+      startedAt: interval.startedAt,
+      resolvedAt: interval.resolvedAt,
+      raw: { adapter: "aim-interruzioni-programmate", heading, when, where, href: href ?? null }
+    }));
+  }
+  return { observations, schemaMatched: true };
+}
+
+/** AGE (Chiasso) WordPress categories for electricity: 19 = unplanned, 24 = planned. */
+const AGE_ELECTRICITY_CATEGORIES = new Set([19, 24]);
+
+/**
+ * AGE (Chiasso) publishes interruptions as WordPress posts whose ACF fields
+ * carry type, start, end, municipality and street (the same data feeds their
+ * app). Expired notices are deleted, so an empty array is the all-clear.
+ */
+async function parseAgePayload(
+  source: SourceRegistryEntry,
+  payload: unknown,
+  observedAt: string
+): Promise<KnownAdapterPayload> {
+  if (!Array.isArray(payload)) return { observations: [], schemaMatched: false };
+  const rows = payload.map(recordOf);
+  const withFields = rows.filter((row) => typeof recordOf(row.acf).app_data_inizio_interruzione === "string");
+  if (rows.length > 0 && withFields.length === 0) return { observations: [], schemaMatched: false };
+  const observedMs = Date.parse(observedAt);
+  const observations: SourceObservationInput[] = [];
+  for (const row of withFields) {
+    const acf = recordOf(row.acf);
+    const heading = compact(stripHtml(stringOrNull(recordOf(row.title).rendered) ?? stringOrNull(acf.app_titolo) ?? ""));
+    const categories = Array.isArray(row.categories) ? row.categories.map(Number) : [];
+    const electricity = categories.some((category) => AGE_ELECTRICITY_CATEGORIES.has(category))
+      || (categories.length === 0 && /elettric/i.test(heading));
+    if (!electricity) continue;
+    const startedAt = parseSwissDateTimeStart(stringOrNull(acf.app_data_inizio_interruzione) ?? "");
+    const resolvedAt = parseSwissDateTimeStart(stringOrNull(acf.app_data_fine_interruzione) ?? "");
+    if (!startedAt) continue;
+    const unplanned = /imprevist/i.test(stringOrNull(acf.app_tipologia_interruzione) ?? heading) || categories.includes(19);
+    const ended = Boolean(resolvedAt && Date.parse(resolvedAt) <= observedMs);
+    const status: CanonicalObservationStatus = ended ? "resolved" : unplanned ? "unplanned" : "planned";
+    const luogo = compact(stringOrNull(acf.app_luogo) ?? "") || "Chiasso";
+    const quartiere = compact(stripHtml(stringOrNull(acf.app_quartiere) ?? ""));
+    const summary = compact(stripHtml(stringOrNull(acf.app_sommario) ?? ""));
+    const title = status === "resolved"
+      ? `Interruzione di corrente terminata a ${luogo}`
+      : unplanned
+        ? `Interruzione di corrente a ${luogo}`
+        : `Interruzione di corrente pianificata a ${luogo}`;
+    observations.push(await makeKnownObservation(source, {
+      status,
+      title,
+      text: compact(`${title}. ${quartiere ? `Zona: ${quartiere}.` : ""} ${summary}`),
+      location: luogo,
+      observedAt,
+      startedAt,
+      resolvedAt,
+      raw: {
+        adapter: "age-wp-interruzioni",
+        id: row.id ?? null,
+        link: stringOrNull(row.link),
+        categories,
+        tipologia: stringOrNull(acf.app_tipologia_interruzione),
+        luogo,
+        quartiere
+      }
+    }));
+  }
+  return { observations, schemaMatched: true };
+}
+
+/**
+ * EW Davos shows one "Netzzustand" box on its homepage ("Momentan keine
+ * Störung im Stromnetz Davos" when all is well). Any other text in that box
+ * is the operator's own outage notice for Davos.
+ */
+async function parseEwdDavosHtml(
+  source: SourceRegistryEntry,
+  html: string,
+  observedAt: string
+): Promise<KnownAdapterPayload> {
+  const box = extractDivBlocks(html, "cinfobox").find((block) => /cinfobox__title[^>]*>\s*Netzzustand\s*</i.test(block));
+  if (!box) return { observations: [], schemaMatched: false };
+  const text = compact(stripHtml(box.match(/class="cinfobox__text"[^>]*>([\s\S]*?)<\/div>/i)?.[1] ?? ""));
+  if (!text) return { observations: [], schemaMatched: false };
+  if (/\bkeine\s+(?:st(?:ö|oe)rung|unterbr|ausf)/i.test(text)) return { observations: [], schemaMatched: true };
+  if (!/st(?:ö|oe)rung|ausfall|unterbruch|unterbrochen|abschaltung|ohne strom/i.test(text)) {
+    return { observations: [], schemaMatched: true };
+  }
+  const observedMs = Date.parse(observedAt);
+  const interval = parseNoticeInterval(text);
+  if (interval.firstDayMs !== null && observedMs - interval.firstDayMs > STALE_NOTICE_MS) {
+    return { observations: [], schemaMatched: true };
+  }
+  const resolved = /\bbehoben|wiederhergestellt|wieder (?:in betrieb|am netz|mit strom)/i.test(text)
+    || Boolean(interval.resolvedAt && Date.parse(interval.resolvedAt) <= observedMs);
+  const planned = /\bgeplant|\bunterhalt|\bwartung|\bnetzarbeiten/i.test(text)
+    || Boolean(interval.startedAt && Date.parse(interval.startedAt) > observedMs);
+  const status: CanonicalObservationStatus = resolved ? "resolved" : planned ? "planned" : "unplanned";
+  const place = text.match(/\bDavos\s+(Platz|Dorf|Frauenkirch|Glaris|Monstein|Wiesen|Clavadel|Laret|Wolfgang)\b/)?.[0] ?? "Davos";
+  const title = status === "planned"
+    ? `Geplanter Stromunterbruch in ${place}`
+    : status === "resolved"
+      ? `Behobener Stromausfall in ${place}`
+      : `Stromausfall in ${place}`;
+  return {
+    schemaMatched: true,
+    observations: [await makeKnownObservation(source, {
+      status,
+      title,
+      text: compact(`${title}. ${text}`),
+      location: place,
+      observedAt,
+      startedAt: interval.startedAt,
+      resolvedAt: status === "planned" || status === "resolved" ? interval.resolvedAt : null,
+      raw: { adapter: "ewd-netzzustand", text: text.slice(0, 2000) }
+    })]
+  };
+}
+
+/**
+ * Thurplus (Frauenfeld) keeps an "Aktuelle Störungen" widget on its
+ * Störungsdienst page: one <li> per notice (h3 headline, p details), or
+ * "Derzeit sind keine Störungen bekannt." Gas, water and district heating
+ * share the widget; only electricity notices are kept.
+ */
+async function parseThurplusHtml(
+  source: SourceRegistryEntry,
+  html: string,
+  observedAt: string
+): Promise<KnownAdapterPayload> {
+  const widget = extractDivBlocks(html, "facts-widget").find((block) => /<h2\b[^>]*>\s*Aktuelle St(?:ö|&ouml;|oe)rungen/i.test(block));
+  const content = widget?.match(/class="facts-widget__content"[^>]*>([\s\S]*?)<\/ul>/i)?.[1];
+  if (!widget || content === undefined) return { observations: [], schemaMatched: false };
+  const observedMs = Date.parse(observedAt);
+  const observations: SourceObservationInput[] = [];
+  for (const item of content.matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)) {
+    const body = item[1] ?? "";
+    const heading = compact(stripHtml(body.match(/<h3\b[^>]*>([\s\S]*?)<\/h3>/i)?.[1] ?? ""));
+    const details = compact(stripHtml(body.replace(/<h3\b[^>]*>[\s\S]*?<\/h3>/i, "")));
+    const combined = compact(`${heading}. ${details}`);
+    if (/\bkeine\s+st(?:ö|oe)rungen\b/i.test(heading)) continue;
+    if (!/strom|elektri/i.test(combined)) continue;
+    if (/\b(gas|wasser|fernw(?:ä|ae)rme)/i.test(heading) && !/strom/i.test(heading)) continue;
+    const interval = parseNoticeInterval(combined);
+    if (interval.firstDayMs !== null && observedMs - interval.firstDayMs > STALE_NOTICE_MS) continue;
+    const startMs = interval.startedAt ? Date.parse(interval.startedAt) : NaN;
+    const resolved = /\bbehoben|wiederhergestellt|wieder vollst(?:ä|ae)ndig/i.test(combined)
+      || Boolean(interval.resolvedAt && Date.parse(interval.resolvedAt) <= observedMs);
+    const planned = !resolved && (/\bgeplant|\bunterhalt|\bwartung/i.test(combined) || startMs > observedMs);
+    const status: CanonicalObservationStatus = resolved ? "resolved" : planned ? "planned" : "unplanned";
+    const area = compact(heading
+      .replace(/^(?:behoben|aktualisiert|update)\s*:\s*/i, "")
+      .replace(/^(?:geplanter?\s+)?(?:stromausfall|stromunterbruch|unterbruch|störung|stoerung)\s*/i, "")
+      .replace(/^(?:an der|an den|in der|im|in|am)\s+/i, ""));
+    const title = status === "planned"
+      ? `Geplanter Stromunterbruch in Frauenfeld${area ? ` (${area})` : ""}`
+      : status === "resolved"
+        ? `Behobener Stromausfall in Frauenfeld${area ? ` (${area})` : ""}`
+        : `Stromausfall in Frauenfeld${area ? ` (${area})` : ""}`;
+    observations.push(await makeKnownObservation(source, {
+      status,
+      title,
+      text: compact(`${title}. ${details}`),
+      location: "Frauenfeld",
+      observedAt,
+      startedAt: interval.startedAt,
+      resolvedAt: status === "unplanned" ? null : interval.resolvedAt,
+      raw: { adapter: "thurplus-aktuelle-stoerungen", heading, details: details.slice(0, 2000) }
+    }));
+  }
+  return { observations, schemaMatched: true };
+}
+
 async function parseRepowerPayload(
   source: SourceRegistryEntry,
   payload: unknown,
@@ -982,6 +1254,7 @@ async function parseKnownApiPayload(
   if (source.source_key === "primeo-netzstatus") return parsePrimeoPayload(source, payload, observedAt);
   if (source.source_key === "repower-stoerungen") return parseRepowerPayload(source, payload, observedAt);
   if (source.source_key === "alertswiss") return parseAlertswissPayload(source, payload, observedAt);
+  if (source.source_key === "age-chiasso-interruzioni") return parseAgePayload(source, payload, observedAt);
   return null;
 }
 
@@ -1045,7 +1318,7 @@ export async function fetchSourceObservations(
   const config = parseConfig(source);
   try {
     const knownApiUrl = config.api_url;
-    if (knownApiUrl && ["bkw-outage", "sak-netzstatus", "romande-energie-pannes", "primeo-netzstatus", "repower-stoerungen", "alertswiss"].includes(source.source_key)) {
+    if (knownApiUrl && ["bkw-outage", "sak-netzstatus", "romande-energie-pannes", "primeo-netzstatus", "repower-stoerungen", "alertswiss", "age-chiasso-interruzioni"].includes(source.source_key)) {
       const fetched = await fetchText(knownApiUrl);
       if (fetched.error) {
         return { observations: [], error: fetched.error, usedFirecrawl: false, transportStatus: "error", parserStatus: "error" };
@@ -1134,7 +1407,10 @@ export async function fetchSourceObservations(
       "ewl-luzern-stoerungen": parseEwlHtml,
       "ses-homepage": parseSesHtml,
       "tb-flawil-betriebsinfo": parseTbFlawilHtml,
-      "ail-homepage": parseAilHtml
+      "ail-homepage": parseAilHtml,
+      "aim-mendrisio-interruzioni": parseAimMendrisioHtml,
+      "ewd-davos-netzzustand": parseEwdDavosHtml,
+      "thurplus-stoerungen": parseThurplusHtml
     };
     const htmlAdapter = htmlAdapters[source.source_key];
     if (htmlAdapter && !fetched.error) {

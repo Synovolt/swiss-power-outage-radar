@@ -18,6 +18,11 @@ import repowerClearFixture from "./fixtures/operators/repower-clear.json?raw";
 import sesFixture from "./fixtures/operators/ses.html?raw";
 import tbFlawilFixture from "./fixtures/operators/tb-flawil.html?raw";
 import ailFixture from "./fixtures/operators/ail.html?raw";
+import aimMendrisioFixture from "./fixtures/operators/aim-mendrisio.html?raw";
+import ageChiassoFixture from "./fixtures/operators/age-chiasso.json?raw";
+import ewdDavosClearFixture from "./fixtures/operators/ewd-davos-clear.html?raw";
+import thurplusFixture from "./fixtures/operators/thurplus.html?raw";
+import thurplusClearFixture from "./fixtures/operators/thurplus-clear.html?raw";
 
 function geoIdentifyBody(municipality: string, canton = "BE"): string {
   return JSON.stringify({
@@ -810,6 +815,179 @@ describe("source registry observations", () => {
       const ended = item.resolvedAt ? Date.parse(item.resolvedAt) <= Date.parse("2026-11-04T12:00:00.000Z") : false;
       expect(item.canonicalStatus).toBe(ended ? "resolved" : "planned");
     }
+  });
+
+  function stubBody(body: string) {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => new Response(body, { status: 200 })));
+  }
+
+  const aimSource = () => registry({
+    source_key: "aim-mendrisio-interruzioni",
+    operator_name: "AIM Mendrisio",
+    url: "https://aim.mendrisio.ch/web/news-e-approfondimenti/interruzioni-programmate.html",
+    area_text: "Mendrisio und AIM Versorgungsgebiet im Mendrisiotto",
+    adapter_config_json: '{"language":"it","status_mode":"aim_interruzioni_programmate"}'
+  });
+
+  it("parses AIM Mendrisio planned power interruptions and skips road and pipe works", async () => {
+    stubBody(aimMendrisioFixture);
+    const result = await fetchSourceObservations({ FIRECRAWL_API_KEY: undefined }, aimSource(), "2026-11-04T12:00:00.000Z");
+
+    expect(result.error).toBeNull();
+    expect(result.parserStatus).toBe("ready");
+    // Seven cards on the live page; only "Avviso interruzione erogazione energia elettrica" is electricity.
+    expect(result.observations).toHaveLength(1);
+    const [besazio] = result.observations;
+    expect(besazio!.title).toBe("Interruzione di corrente pianificata a Besazio");
+    expect(besazio!.canonicalStatus).toBe("planned");
+    expect(besazio!.locationText).toBe("Besazio");
+    // "il 05.11.2026 dalle ore 14.00 alle ore 15.30" in Swiss winter time.
+    expect(besazio!.startedAt).toBe("2026-11-05T13:00:00.000Z");
+    expect(besazio!.resolvedAt).toBe("2026-11-05T14:30:00.000Z");
+    expect(besazio!.evidenceExcerpt).toContain("Via S. Antonio e Via Besazio");
+
+    const after = await fetchSourceObservations({ FIRECRAWL_API_KEY: undefined }, aimSource(), "2026-11-05T15:00:00.000Z");
+    expect(after.observations[0]!.canonicalStatus).toBe("resolved");
+
+    const stale = await fetchSourceObservations({ FIRECRAWL_API_KEY: undefined }, aimSource(), "2026-11-20T12:00:00.000Z");
+    expect(stale.parserStatus).toBe("no_current_outage");
+    expect(stale.observations).toHaveLength(0);
+  });
+
+  it("flags a changed AIM Mendrisio page instead of guessing", async () => {
+    stubBody("<html><body><h1>Interruzioni programmate</h1><p>Stromausfall</p></body></html>");
+    const result = await fetchSourceObservations({ FIRECRAWL_API_KEY: undefined }, aimSource(), "2026-11-04T12:00:00.000Z");
+    expect(result.parserStatus).toBe("needs_adapter");
+    expect(result.error).toMatch(/parser_schema_changed/);
+  });
+
+  const ageSource = () => registry({
+    source_key: "age-chiasso-interruzioni",
+    operator_name: "AGE Chiasso",
+    url: "https://age-sa.ch/",
+    area_text: "Chiasso, Balerna, Morbio Inferiore und Vacallo",
+    adapter_config_json: JSON.stringify({
+      language: "it",
+      status_mode: "operator_api",
+      api_url: "https://age-sa.ch/wp-json/wp/v2/posts?categories=19,24&per_page=20&_fields=id,date,link,title,categories,acf"
+    })
+  });
+
+  it("reads AGE Chiasso WordPress notices and ignores the water sector", async () => {
+    // Real API answer (categories 18,19,24): one unplanned water interruption.
+    stubBody(ageChiassoFixture);
+    const water = await fetchSourceObservations({ FIRECRAWL_API_KEY: undefined }, ageSource(), "2026-10-31T11:30:00.000Z");
+    expect(water.error).toBeNull();
+    expect(water.parserStatus).toBe("no_current_outage");
+    expect(water.observations).toHaveLength(0);
+
+    // Same post moved to the electricity categories: AGE fills the same ACF fields for every sector.
+    const [post] = JSON.parse(ageChiassoFixture) as Array<Record<string, any>>;
+    const unplanned = {
+      ...post,
+      categories: [19],
+      title: { rendered: "Interruzione imprevista settore Elettricit&agrave;" },
+      acf: { ...post!.acf, app_titolo: "Interruzione imprevista settore Elettricità", app_sommario: "<p>A causa di un guasto sulla rete di distribuzione è stata interrotta l'erogazione di Elettricità</p>" }
+    };
+    const planned = {
+      ...unplanned,
+      id: 9999,
+      categories: [24],
+      acf: { ...unplanned.acf, app_tipologia_interruzione: "1: Pianificata", app_data_inizio_interruzione: "06.11.2026 08:00", app_data_fine_interruzione: "06.11.2026 11:30", app_luogo: "Balerna", app_quartiere: "via San Gottardo" }
+    };
+    stubBody(JSON.stringify([unplanned, planned]));
+    const result = await fetchSourceObservations({ FIRECRAWL_API_KEY: undefined }, ageSource(), "2026-10-31T11:30:00.000Z");
+    expect(result.parserStatus).toBe("ready");
+    expect(result.observations.map((item) => [item.title, item.canonicalStatus, item.locationText, item.startedAt, item.resolvedAt])).toEqual([
+      ["Interruzione di corrente a Chiasso", "unplanned", "Chiasso", "2026-10-31T11:09:00.000Z", "2026-10-31T15:09:00.000Z"],
+      ["Interruzione di corrente pianificata a Balerna", "planned", "Balerna", "2026-11-06T07:00:00.000Z", "2026-11-06T10:30:00.000Z"]
+    ]);
+
+    const later = await fetchSourceObservations({ FIRECRAWL_API_KEY: undefined }, ageSource(), "2026-10-31T16:00:00.000Z");
+    expect(later.observations[0]!.title).toBe("Interruzione di corrente terminata a Chiasso");
+    expect(later.observations[0]!.canonicalStatus).toBe("resolved");
+  });
+
+  it("treats an empty AGE Chiasso answer as all-clear and other JSON as a contract change", async () => {
+    stubBody("[]");
+    const empty = await fetchSourceObservations({ FIRECRAWL_API_KEY: undefined }, ageSource(), "2026-11-04T12:00:00.000Z");
+    expect(empty.parserStatus).toBe("no_current_outage");
+    stubBody(JSON.stringify({ code: "rest_no_route" }));
+    const changed = await fetchSourceObservations({ FIRECRAWL_API_KEY: undefined }, ageSource(), "2026-11-04T12:00:00.000Z");
+    expect(changed.parserStatus).toBe("needs_adapter");
+  });
+
+  const ewdSource = () => registry({
+    source_key: "ewd-davos-netzzustand",
+    operator_name: "EW Davos",
+    url: "https://www.ewd.ch/",
+    area_text: "Gemeinde Davos",
+    adapter_config_json: '{"language":"de","status_mode":"ewd_netzzustand"}'
+  });
+
+  it("reads the EW Davos Netzzustand box", async () => {
+    stubBody(ewdDavosClearFixture);
+    const clear = await fetchSourceObservations({ FIRECRAWL_API_KEY: undefined }, ewdSource(), "2026-11-04T12:00:00.000Z");
+    expect(clear.error).toBeNull();
+    expect(clear.parserStatus).toBe("no_current_outage");
+    expect(clear.observations).toHaveLength(0);
+
+    stubBody(ewdDavosClearFixture.replace(
+      "Momentan keine Störung im Stromnetz Davos",
+      "Stromausfall in Davos Platz seit 04.11.2026, 10:40 Uhr. Wir arbeiten mit Hochdruck an der Behebung."
+    ));
+    const outage = await fetchSourceObservations({ FIRECRAWL_API_KEY: undefined }, ewdSource(), "2026-11-04T12:00:00.000Z");
+    expect(outage.parserStatus).toBe("ready");
+    expect(outage.observations).toHaveLength(1);
+    expect(outage.observations[0]!.title).toBe("Stromausfall in Davos Platz");
+    expect(outage.observations[0]!.canonicalStatus).toBe("unplanned");
+    expect(outage.observations[0]!.locationText).toBe("Davos Platz");
+    expect(outage.observations[0]!.startedAt).toBe("2026-11-04T09:40:00.000Z");
+
+    stubBody("<html><body><main>EWD Elektrizitätswerk Davos</main></body></html>");
+    const changed = await fetchSourceObservations({ FIRECRAWL_API_KEY: undefined }, ewdSource(), "2026-11-04T12:00:00.000Z");
+    expect(changed.parserStatus).toBe("needs_adapter");
+  });
+
+  const thurplusSource = () => registry({
+    source_key: "thurplus-stoerungen",
+    operator_name: "Thurplus",
+    url: "https://www.thurplus.ch/fuer-private/kundenservice/stoerung/stoerungsdienst.html/67",
+    area_text: "Frauenfeld und Thurplus Versorgungsgebiet",
+    adapter_config_json: '{"language":"de","status_mode":"thurplus_aktuelle_stoerungen"}'
+  });
+
+  it("reads the Thurplus 'Aktuelle Störungen' widget and drops notices that went stale", async () => {
+    // Widget as archived on 2026-03-07: a resolved outage from 21 August 2025, still on the page.
+    stubBody(thurplusFixture);
+    const fresh = await fetchSourceObservations({ FIRECRAWL_API_KEY: undefined }, thurplusSource(), "2025-08-21T18:00:00.000Z");
+    expect(fresh.parserStatus).toBe("ready");
+    expect(fresh.observations).toHaveLength(1);
+    expect(fresh.observations[0]!.title).toBe("Behobener Stromausfall in Frauenfeld (Bahnhofstrasse und Heimstrasse)");
+    expect(fresh.observations[0]!.canonicalStatus).toBe("resolved");
+    expect(fresh.observations[0]!.locationText).toBe("Frauenfeld");
+    // The notice gives a date but no time: nothing is invented.
+    expect(fresh.observations[0]!.startedAt).toBeNull();
+
+    const archived = await fetchSourceObservations({ FIRECRAWL_API_KEY: undefined }, thurplusSource(), "2026-03-07T08:22:02.000Z");
+    expect(archived.parserStatus).toBe("no_current_outage");
+    expect(archived.observations).toHaveLength(0);
+
+    stubBody(thurplusClearFixture);
+    const clear = await fetchSourceObservations({ FIRECRAWL_API_KEY: undefined }, thurplusSource(), "2026-11-04T12:00:00.000Z");
+    expect(clear.error).toBeNull();
+    expect(clear.parserStatus).toBe("no_current_outage");
+    expect(clear.observations).toHaveLength(0);
+  });
+
+  it("keeps Thurplus gas and water notices out", async () => {
+    stubBody(thurplusClearFixture.replace(
+      "<h3>Derzeit sind keine Störungen bekannt.</h3>",
+      "<h3>Wasserunterbruch an der Rheinstrasse</h3><p>Am 04.11.2026 von 08:00 bis 12:00 Uhr ist die Wasserversorgung unterbrochen.</p>"
+    ));
+    const result = await fetchSourceObservations({ FIRECRAWL_API_KEY: undefined }, thurplusSource(), "2026-11-04T07:00:00.000Z");
+    expect(result.parserStatus).toBe("no_current_outage");
+    expect(result.observations).toHaveLength(0);
   });
 
   it("reads 'Zurzeit sind keine Unterbrechungen geplant' as an all-clear", async () => {
