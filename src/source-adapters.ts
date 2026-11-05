@@ -81,6 +81,14 @@ function stripHtml(html: string): string {
     .replace(/&Uuml;/g, "Ü")
     .replace(/&Ouml;/g, "Ö")
     .replace(/&Auml;/g, "Ä")
+    .replace(/&ndash;/g, "–")
+    .replace(/&mdash;/g, "—")
+    .replace(/&laquo;/g, "«")
+    .replace(/&raquo;/g, "»")
+    .replace(/&eacute;/g, "é")
+    .replace(/&egrave;/g, "è")
+    .replace(/&agrave;/g, "à")
+    .replace(/&rsquo;/g, "’")
     .replace(/&#x([0-9a-f]+);/gi, (_match, hex: string) => String.fromCodePoint(Number.parseInt(hex, 16)))
     .replace(/&#(\d+);/g, (_match, decimal: string) => String.fromCodePoint(Number.parseInt(decimal, 10)));
 }
@@ -1140,6 +1148,313 @@ async function parseThurplusHtml(
   return { observations, schemaMatched: true };
 }
 
+/** Dated operator archives (Kreuzlingen, Repower) are read this far back. */
+const ARCHIVE_WINDOW_MS = 180 * DAY_MS;
+
+function tableCells(row: string): string[] {
+  return [...row.matchAll(/<t[dh]\b[^>]*>([\s\S]*?)<\/t[dh]>/gi)].map((cell) => compact(stripHtml(cell[1] ?? "")));
+}
+
+function isElectricityLabel(text: string): boolean {
+  return /\bstrom|elektri|électri|electri/i.test(text);
+}
+
+/**
+ * IWB (Basel) "Unterbrüche": planned interruptions grouped by municipality
+ * (h3) with one row per street (Strasse | Unterbruch | Von-bis), and current
+ * disturbances (Störungsmeldung | Details | Von-bis | Status). Water, gas and
+ * district heating share both tables; only electricity rows are kept.
+ */
+async function parseIwbHtml(
+  source: SourceRegistryEntry,
+  html: string,
+  observedAt: string
+): Promise<KnownAdapterPayload> {
+  const planned = html.match(/<section\b[^>]*class="[^"]*\bincidents-container\b[^"]*"[^>]*>([\s\S]*?)<\/section>/i)?.[1];
+  const current = html.match(/<section\b[^>]*class="[^"]*\bdisturbances-container\b[^"]*"[^>]*>([\s\S]*?)<\/section>/i)?.[1];
+  if (planned === undefined && current === undefined && !/Geplante Unterbr(?:ü|&uuml;)che/i.test(html)) {
+    return { observations: [], schemaMatched: false };
+  }
+  const observedMs = Date.parse(observedAt);
+  const observations: SourceObservationInput[] = [];
+
+  for (const group of (planned ?? "").split(/<div\b[^>]*class="[^"]*\bincidents-group-heading\b/i).slice(1)) {
+    const municipality = compact(stripHtml(group.match(/<h3\b[^>]*>([\s\S]*?)<\/h3>/i)?.[1] ?? "")) || "Basel";
+    for (const row of group.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)) {
+      const [street, utility, when] = tableCells(row[1] ?? "");
+      if (!street || !utility || !when || /^strasse$/i.test(street)) continue;
+      if (!isElectricityLabel(utility)) continue;
+      const range = parseSwissDateTimeRange(when);
+      if (!range.startedAt) continue;
+      const status = scheduledNoticeStatus(range.startedAt, range.resolvedAt, observedMs);
+      const title = `Geplanter Stromunterbruch in ${municipality}`;
+      observations.push(await makeKnownObservation(source, {
+        status,
+        title,
+        text: compact(`${title}: ${street}. ${when}.`),
+        location: municipality,
+        observedAt,
+        startedAt: range.startedAt,
+        resolvedAt: range.resolvedAt,
+        raw: { adapter: "iwb-unterbrueche", utility, when, detail: street, identity: `${municipality} ${street}` }
+      }));
+    }
+  }
+
+  for (const row of (current ?? "").matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)) {
+    const body = row[1] ?? "";
+    if (!/disturbance-duration/.test(body)) continue;
+    const cells = tableCells(body);
+    const heading = cells[0] ?? "";
+    const when = compact(stripHtml(body.match(/class="disturbance-duration"[^>]*>([\s\S]*?)<\/td>/i)?.[1] ?? ""));
+    const state = compact(stripHtml(body.match(/class="disturbance_status"[^>]*>([\s\S]*?)<\/td>/i)?.[1] ?? ""));
+    if (!heading || !/\bstrom/i.test(heading)) continue;
+    const range = parseSwissDateTimeRange(when);
+    const resolved = /behoben|abgeschlossen/i.test(state);
+    const plannedWork = /geplant/i.test(heading);
+    const status: CanonicalObservationStatus = resolved ? "resolved" : plannedWork ? "planned" : "unplanned";
+    const place = heading.match(/\bin\s+([A-ZÄÖÜ][\p{L}.-]+(?:\s+[A-ZÄÖÜ][\p{L}.-]+)?)\s*$/u)?.[1] ?? "Basel";
+    const street = compact(heading
+      .replace(/^[^,]*(?:ausfall|unterbruch|störung|stoerung)[^,]*,\s*/i, "")
+      .replace(/\s+in\s+[A-ZÄÖÜ][\p{L}.-]+(?:\s+[A-ZÄÖÜ][\p{L}.-]+)?\s*$/u, "")
+      .replace(/^(?:an der|an den|in der|im|am)\s+/i, ""));
+    const title = status === "planned"
+      ? `Geplanter Stromunterbruch in ${place}`
+      : status === "resolved"
+        ? `Behobener Stromausfall in ${place}`
+        : `Stromausfall in ${place}`;
+    observations.push(await makeKnownObservation(source, {
+      status,
+      title,
+      text: compact(`${title}: ${heading}. ${when}. ${state}.`),
+      location: place,
+      observedAt,
+      startedAt: range.startedAt,
+      resolvedAt: status === "unplanned" ? null : range.resolvedAt,
+      raw: { adapter: "iwb-stoerungen", heading, when, state, detail: street || null, identity: `${place} ${street || heading}` }
+    }));
+  }
+  return { observations, schemaMatched: true };
+}
+
+/**
+ * Energie Kreuzlingen keeps accordions per topic: "Störungen" and "Geplante
+ * Unterbrüche" (each item: date, headline, text with "Dauer" and "Ort"), plus
+ * "Baustellen" and an FAQ, which are skipped. Water and gas share the lists.
+ */
+async function parseEnergieKreuzlingenHtml(
+  source: SourceRegistryEntry,
+  html: string,
+  observedAt: string
+): Promise<KnownAdapterPayload> {
+  const sections = [...html.matchAll(/<h2\b[^>]*class="[^"]*\baccordion-main-title\b[^"]*"[^>]*>([\s\S]*?)<\/h2>/gi)];
+  if (sections.length === 0) return { observations: [], schemaMatched: false };
+  const observedMs = Date.parse(observedAt);
+  const observations: SourceObservationInput[] = [];
+  for (const [index, section] of sections.entries()) {
+    const heading = compact(stripHtml(section[1] ?? ""));
+    const plannedSection = /geplant/i.test(heading);
+    if (!plannedSection && !/st(?:ö|oe)rung/i.test(heading)) continue;
+    const start = section.index ?? 0;
+    const end = sections[index + 1]?.index ?? html.length;
+    for (const item of extractDivBlocks(html.slice(start, end), "accordion-item")) {
+      const date = compact(stripHtml(item.match(/class="accordion-date"[^>]*>([\s\S]*?)<\/span>/i)?.[1] ?? "")).replace(/:$/, "");
+      const title = compact(stripHtml(item.match(/<h3\b[^>]*class="[^"]*accordion-title[^"]*"[^>]*>([\s\S]*?)<\/h3>/i)?.[1] ?? "").replace(date, "")).replace(/^:\s*/, "");
+      const content = compact(stripHtml(item.match(/class="accordion-content-inner"[^>]*>([\s\S]*?)<\/div>\s*<\/div>/i)?.[1] ?? ""));
+      if (!title || !/\bstrom/i.test(title)) continue;
+      const day = parseNoticeInterval(date);
+      if (day.firstDayMs === null || observedMs - day.firstDayMs > ARCHIVE_WINDOW_MS) continue;
+      const ort = compact(content.match(/\bOrt\s*:\s*(.+?)(?:\s+Wichtig\b|$)/i)?.[1] ?? "");
+      const street = ort || compact(title
+        .replace(/^(?:unterbruch\s+stromlieferung|stromunterbruch|stromausfall)\s*/i, "")
+        .replace(/^(?:in der|in den|im gebiet|im teilgebiet|an der|im|in)\s+/i, ""));
+      let status: CanonicalObservationStatus;
+      let startedAt: string | null;
+      let resolvedAt: string | null;
+      if (plannedSection) {
+        const interval = parseNoticeInterval(content.match(/dauer\s*:(.+?)(?:\bOrt\s*:|$)/i)?.[1] ?? content);
+        startedAt = interval.startedAt ?? parseNoticeInterval(`${date} ${content}`).startedAt;
+        resolvedAt = interval.resolvedAt;
+        status = scheduledNoticeStatus(startedAt ?? new Date(day.firstDayMs).toISOString(), resolvedAt, observedMs);
+      } else {
+        // "Ein technischer Defekt führte um ca. 16:00 …": the time binds to the item date.
+        startedAt = parseNoticeInterval(`${date} ${content}`).startedAt;
+        // Without a time the first sighting would stand in for the start: only
+        // acceptable while the notice is fresh, never for the archive.
+        if (!startedAt && observedMs - day.firstDayMs > STALE_NOTICE_MS) continue;
+        const minutes = Number(content.match(/(?:innerhalb von|nach ca\.?|nach)\s*(\d{1,3})\s*min/i)?.[1] ?? NaN);
+        resolvedAt = startedAt && Number.isFinite(minutes) ? new Date(Date.parse(startedAt) + minutes * 60000).toISOString() : null;
+        const restored = /wiederhergestellt|wieder sichergestellt|behoben|wieder versorgt/i.test(content);
+        status = restored || observedMs - day.firstDayMs > DAY_MS ? "resolved" : "unplanned";
+      }
+      const label = status === "planned" || (plannedSection && status === "resolved")
+        ? "Geplanter Stromunterbruch in Kreuzlingen"
+        : status === "resolved" ? "Behobener Stromausfall in Kreuzlingen" : "Stromausfall in Kreuzlingen";
+      observations.push(await makeKnownObservation(source, {
+        status,
+        title: label,
+        text: compact(`${label}: ${title}. ${content}`).slice(0, 1200),
+        location: "Kreuzlingen",
+        observedAt,
+        startedAt,
+        resolvedAt,
+        raw: { adapter: "energie-kreuzlingen-accordion", section: heading, date, heading: title, detail: street || null, identity: `${date} ${title}` }
+      }));
+    }
+  }
+  return { observations, schemaMatched: true };
+}
+
+/** "Netzstörung in Gemeindeteilen von Egolzwil, Schötz, Nebikon, Dagmersellen" → the municipalities. */
+function ckwPlaces(text: string): string | null {
+  const match = text.match(/(?:netzst(?:ö|oe)rung|stromausfall|stromunterbruch|unterbruch)\s+(?:in|im|bei)\s+(?:(?:den\s+)?gemeindeteilen\s+von\s+|teilen\s+(?:von|der\s+gemeinden?)\s+|der\s+gemeinde\s+|den\s+gemeinden\s+|gemeinde\s+)?([^.]+?)(?:\.|\s+grund\b|$)/i);
+  const places = compact(match?.[1] ?? "").replace(/\s+und\s+/g, ", ");
+  return places || null;
+}
+
+/**
+ * CKW "Störungen und Unterbrüche": one "CKW Stromnetz" box with the current
+ * state ("Momentan sind keine Netzstörungen bekannt.") and the last
+ * disturbance ("Letzte Störung: 01. November 2026, 13.31 Uhr bis 13.40 Uhr /
+ * Netzstörung in Gemeindeteilen von … / Grund: …"). The all-clear sentence and
+ * the last disturbance stand side by side, so neither may hide the other.
+ */
+async function parseCkwHtml(
+  source: SourceRegistryEntry,
+  html: string,
+  observedAt: string
+): Promise<KnownAdapterPayload> {
+  const box = extractDivBlocks(html, "ce-highlight-box").find((block) => /<h2\b[^>]*>\s*CKW Stromnetz\s*<\/h2>/i.test(block));
+  const body = box?.match(/class="ce-text"[^>]*>([\s\S]*?)<\/div>/i)?.[1];
+  if (!box || body === undefined) return { observations: [], schemaMatched: false };
+  const observedMs = Date.parse(observedAt);
+  const observations: SourceObservationInput[] = [];
+  for (const paragraph of body.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)) {
+    const text = compact(stripHtml((paragraph[1] ?? "").replace(/<br\s*\/?>/gi, ". ")));
+    if (!text || /\bkeine\s+(?:netz)?st(?:ö|oe)rungen\b/i.test(text)) continue;
+    const last = /letzte\s+st(?:ö|oe)rung/i.test(text);
+    if (!last && !/st(?:ö|oe)rung|ausfall|unterbruch|ohne strom/i.test(text)) continue;
+    const interval = parseNoticeInterval(text);
+    const lastKnownMs = interval.resolvedAt ? Date.parse(interval.resolvedAt) : interval.firstDayMs;
+    if (last && (lastKnownMs === null || observedMs - lastKnownMs > ARCHIVE_WINDOW_MS)) continue;
+    const places = ckwPlaces(text) ?? explicitLocation(text);
+    if (!places) continue;
+    const planned = /\bgeplant|\bunterhalt|\bwartung/i.test(text);
+    const status: CanonicalObservationStatus = last ? "resolved" : planned ? "planned" : "unplanned";
+    const cause = compact(text.match(/\bGrund\s*:\s*([^.]+)/i)?.[1] ?? "") || null;
+    const title = status === "resolved"
+      ? `Behobener Stromausfall in ${places}`
+      : status === "planned" ? `Geplanter Stromunterbruch in ${places}` : `Stromausfall in ${places}`;
+    observations.push(await makeKnownObservation(source, {
+      status,
+      title,
+      text: compact(`${title}. ${text.replace(/^letzte\s+st(?:ö|oe)rung\s*:?\s*\.?\s*/i, "")}`),
+      location: places,
+      observedAt,
+      startedAt: interval.startedAt,
+      resolvedAt: status === "unplanned" ? null : interval.resolvedAt,
+      raw: { adapter: "ckw-stromnetz-box", text: text.slice(0, 1000), cause }
+    }));
+  }
+  return { observations, schemaMatched: true };
+}
+
+/**
+ * WWZ "Aktuelle Störungen": one div.outage per notice with category, title,
+ * affected area, start, end ("Störung behoben seit") and service labels
+ * (Strom, Telekom, TV …). An empty page carries no outage blocks.
+ */
+async function parseWwzHtml(
+  source: SourceRegistryEntry,
+  html: string,
+  observedAt: string
+): Promise<KnownAdapterPayload> {
+  const blocks = [...html.matchAll(/<div\s+class="outage"\s*id="([^"]*)"/gi)];
+  if (blocks.length === 0 && !/class="header__title[^"]*"[^>]*>\s*Aktuelle St(?:ö|&#246;|&ouml;)rungen/i.test(html)) {
+    return { observations: [], schemaMatched: false };
+  }
+  const observedMs = Date.parse(observedAt);
+  const observations: SourceObservationInput[] = [];
+  for (const [index, match] of blocks.entries()) {
+    const start = match.index ?? 0;
+    const block = html.slice(start, blocks[index + 1]?.index ?? start + 12000);
+    // Every field is "<div class=X><div class=outage__section-title>Label</div>Value</div>".
+    const field = (className: string): { label: string; value: string } => {
+      const found = block.match(new RegExp(`class="${className}[^"]*"[^>]*>\\s*<div class="outage__section-title">([\\s\\S]*?)<\\/div>([\\s\\S]*?)<\\/div>`, "i"));
+      return { label: compact(stripHtml(found?.[1] ?? "")), value: compact(stripHtml(found?.[2] ?? "")) };
+    };
+    const category = field("outage__category").label;
+    const headline = compact(stripHtml(block.match(/class="outage__title"[^>]*>([\s\S]*?)<\/div>/i)?.[1] ?? ""));
+    const labels = [...block.matchAll(/class="text"[^>]*>([\s\S]*?)<\/span>/gi)].map((label) => compact(stripHtml(label[1] ?? "")));
+    if (!labels.some(isElectricityLabel) && !isElectricityLabel(category)) continue;
+    const target = field("outage__target").value;
+    const startText = field("outage__date-start").value;
+    const { label: endLabel, value: endText } = field("outage__date-end");
+    const startedAt = parseNoticeInterval(startText).startedAt;
+    const endAt = parseNoticeInterval(endText).startedAt;
+    const resolved = /behoben/i.test(endLabel) || Boolean(endAt && Date.parse(endAt) <= observedMs && !/voraussichtlich/i.test(endLabel));
+    const planned = /geplant|unterhalt|wartung/i.test(`${category} ${headline}`);
+    const status: CanonicalObservationStatus = resolved ? "resolved" : planned ? "planned" : "unplanned";
+    const place = compact(target.replace(/^(?:gemeindegebiet|gemeinde|stadt|ortsteil)\s+/i, "")) || explicitLocation(headline) || null;
+    if (!place) continue;
+    const title = status === "resolved"
+      ? `Behobener Stromausfall in ${place}`
+      : status === "planned" ? `Geplanter Stromunterbruch in ${place}` : `Stromausfall in ${place}`;
+    observations.push(await makeKnownObservation(source, {
+      status,
+      title,
+      text: compact(`${title}. ${headline}. Beginn: ${startText}. ${endText ? `${endLabel} ${endText}.` : ""}`),
+      location: place,
+      observedAt,
+      startedAt,
+      resolvedAt: status === "unplanned" ? null : endAt,
+      raw: { adapter: "wwz-outage", id: match[1] ?? null, category, headline, labels, identity: match[1] || `${place} ${headline}` }
+    }));
+  }
+  return { observations, schemaMatched: true };
+}
+
+/**
+ * Repower "Vergangene Störungen": a server-rendered table (Datum | Uhrzeit |
+ * Grund | Betroffene Gebiete) under the live map on the Störungen page. Every
+ * row is a finished outage with the operator's own times and places.
+ */
+async function parseRepowerHistoryHtml(
+  source: SourceRegistryEntry,
+  html: string,
+  observedAt: string
+): Promise<KnownAdapterPayload> {
+  const headingAt = html.search(/Vergangene St(?:ö|&ouml;|oe)rungen\s*<\/h2>/i);
+  const table = headingAt >= 0 ? html.slice(headingAt).match(/<table\b[\s\S]*?<\/table>/i)?.[0] : undefined;
+  if (!table || !/Betroffene Gebiete/i.test(table)) return { observations: [], schemaMatched: false };
+  const observedMs = Date.parse(observedAt);
+  const observations: SourceObservationInput[] = [];
+  for (const row of (table.match(/<tbody\b[\s\S]*?<\/tbody>/i)?.[0] ?? "").matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)) {
+    const [rawDate, time, reason, areas] = tableCells(row[1] ?? "");
+    if (!rawDate || !areas) continue;
+    // "14-15.03.2026" spans midnight: the times bind to the first day.
+    const date = rawDate.replace(/^(\d{1,2})\s*[-–]\s*\d{1,2}\.(\d{1,2}\.\d{4})/, "$1.$2");
+    const interval = parseNoticeInterval(`${date} ${(time ?? "").replace(/\s*[-–]\s*/, " bis ")}`);
+    if (interval.firstDayMs === null || observedMs - interval.firstDayMs > ARCHIVE_WINDOW_MS) continue;
+    const places = [...new Set(areas.replace(/\.\s*$/, "").split(/\s*,\s*|\s+und\s+/)
+      .map((place) => compact(place.replace(/^(?:teil|teile|teilweise|EW)\s+/i, "")))
+      .filter(Boolean))].join(", ");
+    if (!places) continue;
+    const title = `Behobener Stromausfall in ${places}`;
+    observations.push(await makeKnownObservation(source, {
+      status: "resolved",
+      title,
+      text: compact(`${title}. ${date}, ${time ?? ""}. ${reason ? `Grund: ${reason}.` : ""}`),
+      location: places,
+      observedAt,
+      startedAt: interval.startedAt,
+      resolvedAt: interval.resolvedAt,
+      raw: { adapter: "repower-vergangene-stoerungen", date, time: time ?? null, reason: reason ?? null, areas, identity: places }
+    }));
+  }
+  return { observations, schemaMatched: true };
+}
+
 async function parseRepowerPayload(
   source: SourceRegistryEntry,
   payload: unknown,
@@ -1323,6 +1638,19 @@ function jsonItems(payload: unknown, config: AdapterConfig): unknown[] {
   return [];
 }
 
+const BLOCK_PAGE = /accesso bloccato|access denied|access blocked|zugriff verweigert|accès refusé|acces refuse|request blocked|you have been blocked|attention required|just a moment\.\.\.|cf-chl-|captcha/i;
+
+/** A short page that only says access is denied (geo/IP block, WAF or bot challenge). */
+export function isBlockPage(html: string): boolean {
+  return html.length < 20000 && BLOCK_PAGE.test(html);
+}
+
+function blockPageSummary(html: string): string {
+  const title = compact(stripHtml(html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? ""));
+  const body = compact(stripHtml(html.replace(/<title\b[^>]*>[\s\S]*?<\/title>/i, " ")));
+  return compact(`${title} ${body}`).slice(0, 160);
+}
+
 export async function fetchSourceObservations(
   env: Pick<Env, "FIRECRAWL_API_KEY">,
   source: SourceRegistryEntry,
@@ -1424,11 +1752,27 @@ export async function fetchSourceObservations(
       "ail-homepage": parseAilHtml,
       "aim-mendrisio-interruzioni": parseAimMendrisioHtml,
       "ewd-davos-netzzustand": parseEwdDavosHtml,
-      "thurplus-stoerungen": parseThurplusHtml
+      "thurplus-stoerungen": parseThurplusHtml,
+      "iwb-unterbrueche": parseIwbHtml,
+      "energie-kreuzlingen-stoerungen": parseEnergieKreuzlingenHtml,
+      "ckw-stoerungen": parseCkwHtml,
+      "wwz-stoerungen": parseWwzHtml,
+      "repower-vergangene-stoerungen": parseRepowerHistoryHtml
     };
     const htmlAdapter = htmlAdapters[source.source_key];
     if (htmlAdapter && !fetched.error) {
       const parsed = await htmlAdapter(source, fetched.text, observedAt);
+      if (!parsed.schemaMatched && isBlockPage(fetched.text)) {
+        // A 200 with an access-denied page (SES geo-blocks the Worker's egress) is a
+        // transport problem, not a markup change: report it as such.
+        return {
+          observations: [],
+          error: `blocked_by_operator: ${blockPageSummary(fetched.text)}`,
+          usedFirecrawl: false,
+          transportStatus: "error",
+          parserStatus: "error"
+        };
+      }
       if (!parsed.schemaMatched) {
         return {
           observations: [],

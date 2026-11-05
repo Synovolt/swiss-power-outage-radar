@@ -33,7 +33,10 @@ export const SINGLE_CANTON_OPERATORS: Readonly<Record<string, string>> = {
   "Energie Uster": "ZH",
   "EKZ": "ZH",
   "EKS": "SH",
-  "AEW": "AG"
+  "AEW": "AG",
+  "IWB": "BS",
+  "Energie Kreuzlingen": "TG",
+  "WWZ": "ZG"
 };
 /** Unplanned records starting further apart than this are separate incidents. */
 export const UNPLANNED_START_SPREAD_MS = 6 * 60 * 60 * 1000;

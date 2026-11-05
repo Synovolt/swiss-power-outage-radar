@@ -100,7 +100,7 @@ export const SOURCE_REGISTRY_SEEDS: SourceRegistrySeed[] = [
     check_interval_minutes: 15,
     priority: 92,
     firecrawl_enabled: 0,
-    adapter_config: { language: "de", status_mode: "current_page", allow_generic_positive: true, utility_filter: "electricity_only", no_outage_terms: commonNoOutageTerms }
+    adapter_config: { language: "de", status_mode: "ckw_stromnetz_box", utility_filter: "electricity_only", no_outage_terms: commonNoOutageTerms }
   },
   {
     source_key: "aew-stromausfall",
@@ -123,10 +123,10 @@ export const SOURCE_REGISTRY_SEEDS: SourceRegistrySeed[] = [
     url: "https://www.iwb.ch/servicecenter/unterbrueche-stoerungen/unterbrueche",
     area_text: "IWB Versorgungsgebiet Basel",
     trust_level: "official",
-    check_interval_minutes: 15,
+    check_interval_minutes: 30,
     priority: 88,
     firecrawl_enabled: 0,
-    adapter_config: { language: "de", status_mode: "planned_and_current", utility_filter: "electricity_only", no_outage_terms: commonNoOutageTerms }
+    adapter_config: { language: "de", status_mode: "iwb_unterbrueche_table", utility_filter: "electricity_only", no_outage_terms: commonNoOutageTerms }
   },
   {
     source_key: "primeo-netzstatus",
@@ -168,6 +168,19 @@ export const SOURCE_REGISTRY_SEEDS: SourceRegistrySeed[] = [
     adapter_config: { language: "de", status_mode: "operator_api", api_url: "https://www.repower.com/umbraco/api/Stoerung/GetWarnings?culture=de", utility_filter: "electricity_only", no_outage_terms: commonNoOutageTerms, historical_terms: ["vergangene störungen"] }
   },
   {
+    source_key: "repower-vergangene-stoerungen",
+    operator_name: "Repower",
+    source_type: "html",
+    source_category: "news_feed",
+    url: "https://www.repower.com/ch/kundencenter/stoerungen-stromausfaelle",
+    area_text: "Repower Netzgebiet in Graubünden und angrenzenden Regionen",
+    trust_level: "official",
+    check_interval_minutes: 60,
+    priority: 60,
+    firecrawl_enabled: 0,
+    adapter_config: { language: "de", status_mode: "repower_vergangene_stoerungen", utility_filter: "electricity_only" }
+  },
+  {
     source_key: "ewb-stoerungsmeldungen",
     operator_name: "Energie Wasser Bern",
     source_type: "html",
@@ -191,7 +204,7 @@ export const SOURCE_REGISTRY_SEEDS: SourceRegistrySeed[] = [
     check_interval_minutes: 15,
     priority: 78,
     firecrawl_enabled: 0,
-    adapter_config: { language: "de", status_mode: "multi_utility", utility_filter: "electricity_only", no_outage_terms: commonNoOutageTerms }
+    adapter_config: { language: "de", status_mode: "wwz_outage_blocks", utility_filter: "electricity_only", no_outage_terms: commonNoOutageTerms }
   },
   {
     source_key: "ewl-luzern-stoerungen",
@@ -249,11 +262,11 @@ export const SOURCE_REGISTRY_SEEDS: SourceRegistrySeed[] = [
     source_key: "ebs-stoerungen",
     operator_name: "ebs",
     source_type: "html",
-    source_category: "live_status",
+    source_category: "discovery_only",
     url: "https://www.ebs.swiss/stoerungen/",
     area_text: "ebs Netzgebiet",
     trust_level: "official",
-    check_interval_minutes: 15,
+    check_interval_minutes: 360,
     priority: 66,
     firecrawl_enabled: 0,
     adapter_config: { language: "de", status_mode: "regional_status", utility_filter: "electricity_only", no_outage_terms: commonNoOutageTerms }
@@ -262,11 +275,11 @@ export const SOURCE_REGISTRY_SEEDS: SourceRegistrySeed[] = [
     source_key: "energie-uster-unterbrueche",
     operator_name: "Energie Uster",
     source_type: "html",
-    source_category: "live_status",
+    source_category: "discovery_only",
     url: "https://energieuster.ch/service-center/unterbrueche-stoerungen/",
     area_text: "Uster und Energie Uster Versorgungsgebiet",
     trust_level: "official",
-    check_interval_minutes: 15,
+    check_interval_minutes: 360,
     priority: 64,
     firecrawl_enabled: 0,
     adapter_config: { language: "de", status_mode: "planned_and_current", utility_filter: "electricity_only", no_outage_terms: commonNoOutageTerms }
@@ -327,14 +340,14 @@ export const SOURCE_REGISTRY_SEEDS: SourceRegistrySeed[] = [
     source_key: "werke-zuerichsee-stoerungsmeldung",
     operator_name: "Werke am Zürichsee",
     source_type: "html",
-    source_category: "news_feed",
-    url: "https://werkezuerichsee.ch/category/newsticker-stoerungsmeldung/",
+    source_category: "live_status",
+    url: "https://werkezuerichsee.ch/kundenservice/aktuelle-stoerungen",
     area_text: "Zürichsee-Gemeinden im Versorgungsgebiet der Werke am Zürichsee",
     trust_level: "official",
     check_interval_minutes: 30,
     priority: 54,
     firecrawl_enabled: 0,
-    adapter_config: { language: "de", status_mode: "news_feed", utility_filter: "electricity_only", no_outage_terms: commonNoOutageTerms }
+    adapter_config: { language: "de", status_mode: "current_page", utility_filter: "electricity_only", no_outage_terms: ["aktuell gibt es keine störungen", ...commonNoOutageTerms] }
   },
   {
     source_key: "energie-kreuzlingen-stoerungen",
@@ -344,10 +357,10 @@ export const SOURCE_REGISTRY_SEEDS: SourceRegistrySeed[] = [
     url: "https://energiekreuzlingen.ch/services/stoerungen",
     area_text: "Kreuzlingen und Energie Kreuzlingen Versorgungsgebiet",
     trust_level: "official",
-    check_interval_minutes: 15,
+    check_interval_minutes: 30,
     priority: 52,
     firecrawl_enabled: 0,
-    adapter_config: { language: "de", status_mode: "regional_status", utility_filter: "electricity_only", no_outage_terms: commonNoOutageTerms }
+    adapter_config: { language: "de", status_mode: "kreuzlingen_accordion", utility_filter: "electricity_only", no_outage_terms: commonNoOutageTerms }
   },
   {
     source_key: "ewn-neuenhof-stoerungsmeldungen",
@@ -366,11 +379,11 @@ export const SOURCE_REGISTRY_SEEDS: SourceRegistrySeed[] = [
     source_key: "ew-urnaesch-stoerungen",
     operator_name: "EW Urnäsch",
     source_type: "html",
-    source_category: "news_feed",
+    source_category: "discovery_only",
     url: "https://ewurnaesch.ch/kundenservice/aktuelle-stoerungen/",
     area_text: "Urnäsch",
     trust_level: "official",
-    check_interval_minutes: 30,
+    check_interval_minutes: 360,
     priority: 46,
     firecrawl_enabled: 0,
     adapter_config: { language: "de", status_mode: "news_feed", utility_filter: "electricity_only", no_outage_terms: commonNoOutageTerms }
@@ -418,11 +431,11 @@ export const SOURCE_REGISTRY_SEEDS: SourceRegistrySeed[] = [
     source_key: "tbgs-news",
     operator_name: "TBGS",
     source_type: "html",
-    source_category: "news_feed",
+    source_category: "discovery_only",
     url: "https://tbgs.ch/news",
     area_text: "TBGS Versorgungsgebiet",
     trust_level: "official",
-    check_interval_minutes: 30,
+    check_interval_minutes: 360,
     priority: 38,
     firecrawl_enabled: 0,
     adapter_config: { language: "de", status_mode: "news_feed", utility_filter: "electricity_only", no_outage_terms: commonNoOutageTerms }
@@ -473,11 +486,11 @@ export const SOURCE_REGISTRY_SEEDS: SourceRegistrySeed[] = [
     source_key: "viteos-actualites",
     operator_name: "Viteos",
     source_type: "html",
-    source_category: "news_feed",
+    source_category: "discovery_only",
     url: "https://www.viteos.ch/actualites/",
     area_text: "Viteos Versorgungsgebiet Neuenburg/Jura",
     trust_level: "official",
-    check_interval_minutes: 30,
+    check_interval_minutes: 360,
     priority: 30,
     firecrawl_enabled: 0,
     adapter_config: { language: "fr", status_mode: "news_feed", utility_filter: "electricity_only", no_outage_terms: ["aucune panne", "pas de panne", ...commonNoOutageTerms] }
@@ -486,37 +499,37 @@ export const SOURCE_REGISTRY_SEEDS: SourceRegistrySeed[] = [
     source_key: "ekz-stoerungen",
     operator_name: "EKZ",
     source_type: "html",
-    source_category: "live_status",
+    source_category: "discovery_only",
     url: "https://www.ekz.ch/de/kundenservice/self-service/Meldungen/stoerungsdienst-und-unterbrueche.html",
     area_text: "Kanton Zürich ausser Stadt Zürich und einzelne unabhängige Gemeindewerke",
     trust_level: "official",
-    check_interval_minutes: 15,
+    check_interval_minutes: 360,
     priority: 97,
     firecrawl_enabled: 0,
-    adapter_config: { language: "de", status_mode: "current_page", allow_generic_positive: true, utility_filter: "electricity_only", no_outage_terms: commonNoOutageTerms }
+    adapter_config: { language: "de", status_mode: "current_page", utility_filter: "electricity_only", no_outage_terms: commonNoOutageTerms }
   },
   {
     source_key: "groupe-e-pannenhilfe",
     operator_name: "Groupe E",
     source_type: "html",
-    source_category: "live_status",
+    source_category: "discovery_only",
     url: "https://www.groupe-e.ch/de/pannenhilfe",
     area_text: "Groupe E Netzgebiet in Freiburg, Neuenburg, Waadt und angrenzenden Gebieten",
     trust_level: "official",
-    check_interval_minutes: 15,
+    check_interval_minutes: 360,
     priority: 95,
     firecrawl_enabled: 1,
-    adapter_config: { language: "de", status_mode: "current_page", allow_generic_positive: true, utility_filter: "electricity_only", no_outage_terms: ["aucune panne", "pas de panne", ...commonNoOutageTerms] }
+    adapter_config: { language: "de", status_mode: "current_page", utility_filter: "electricity_only", no_outage_terms: ["aucune panne", "pas de panne", ...commonNoOutageTerms] }
   },
   {
     source_key: "sig-actualites",
     operator_name: "SIG",
     source_type: "html",
-    source_category: "news_feed",
+    source_category: "discovery_only",
     url: "https://ww2.sig-ge.ch/actualites",
     area_text: "Kanton Genf und SIG Versorgungsgebiet",
     trust_level: "official",
-    check_interval_minutes: 30,
+    check_interval_minutes: 360,
     priority: 91,
     firecrawl_enabled: 0,
     adapter_config: { language: "fr", status_mode: "news_feed", utility_filter: "electricity_only", no_outage_terms: ["aucune panne", "pas de panne", ...commonNoOutageTerms] }
@@ -578,10 +591,10 @@ export const SOURCE_REGISTRY_SEEDS: SourceRegistrySeed[] = [
     operator_name: "SIL Lausanne",
     source_type: "html",
     source_category: "discovery_only",
-    url: "https://www.sil-lausanne.ch/",
+    url: "https://www.lausanne.ch/sil",
     area_text: "Lausanne und SIL Versorgungsgebiet",
     trust_level: "official",
-    check_interval_minutes: 30,
+    check_interval_minutes: 360,
     priority: 85,
     firecrawl_enabled: 0,
     adapter_config: { language: "fr", status_mode: "homepage_discovery", utility_filter: "electricity_only", no_outage_terms: ["aucune panne", "pas de panne", ...commonNoOutageTerms] }
@@ -603,14 +616,14 @@ export const SOURCE_REGISTRY_SEEDS: SourceRegistrySeed[] = [
     source_key: "sgsw-stoerungen",
     operator_name: "St.Galler Stadtwerke",
     source_type: "html",
-    source_category: "live_status",
+    source_category: "discovery_only",
     url: "https://www.sgsw.ch/home/stoerungen.html",
     area_text: "Stadt St. Gallen",
     trust_level: "official",
-    check_interval_minutes: 15,
+    check_interval_minutes: 360,
     priority: 81,
     firecrawl_enabled: 0,
-    adapter_config: { language: "de", status_mode: "current_page", allow_generic_positive: true, utility_filter: "electricity_only", no_outage_terms: commonNoOutageTerms }
+    adapter_config: { language: "de", status_mode: "current_page", utility_filter: "electricity_only", no_outage_terms: commonNoOutageTerms }
   },
   {
     source_key: "oiken-homepage",
@@ -620,7 +633,7 @@ export const SOURCE_REGISTRY_SEEDS: SourceRegistrySeed[] = [
     url: "https://www.oiken.ch/",
     area_text: "OIKEN Netzgebiet im Wallis",
     trust_level: "official",
-    check_interval_minutes: 30,
+    check_interval_minutes: 360,
     priority: 79,
     firecrawl_enabled: 0,
     adapter_config: { language: "fr", status_mode: "homepage_discovery", utility_filter: "electricity_only", no_outage_terms: ["aucune panne", "pas de panne", ...commonNoOutageTerms] }
@@ -633,7 +646,7 @@ export const SOURCE_REGISTRY_SEEDS: SourceRegistrySeed[] = [
     url: "https://www.eks.ch/",
     area_text: "EKS Netzgebiet Schaffhausen",
     trust_level: "official",
-    check_interval_minutes: 30,
+    check_interval_minutes: 360,
     priority: 77,
     firecrawl_enabled: 0,
     adapter_config: { language: "de", status_mode: "homepage_discovery", utility_filter: "electricity_only", no_outage_terms: commonNoOutageTerms }
