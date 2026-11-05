@@ -12,6 +12,7 @@ import {
   getEventsNeedingIntelligence,
   getEventsForPublicationRevalidation,
   getHistoricalBackfillTargets,
+  type HistoricalBackfillCursor,
   getEnabledSourceAuthorityHosts,
   getLatestAlertSnapshot,
   getLinkedRelevantItemsNeedingCandidate,
@@ -41,7 +42,6 @@ import {
   recordPublicationRevalidationRun,
   refreshOutageEventAfterSource,
   recordEventSourcePresence,
-  reconcileSourcePresence,
   updateSourceRegistryHealth,
   updateOutageEventCandidateDetails,
   updateOutageEventMailDecision,
@@ -54,7 +54,7 @@ import { canAutoMergeLocation, canCreateEvent, makeEventTitle, normalizeLocation
 import { normalizeSwissLocation } from "./geo";
 import { decideNewEventMail, decideUpdateMail } from "./intelligence";
 import { evaluatePublicEvent } from "./publication";
-import { backfillEventCantons, refreshPublicProjection, resolveMissingPins } from "./public-projection";
+import { backfillEventCantons, readStatsCache, refreshPublicProjection, resolveMissingPins, writeStatsCache } from "./public-projection";
 import { refreshPublicAggregates } from "./public-stats";
 
 /** Bounded per cron run so a backlog never blows the 10 ms CPU / subrequest budget. */
@@ -648,12 +648,35 @@ async function backfillEventIntelligence(env: Env): Promise<{ updated: number; e
   return { updated, errors };
 }
 
+const HISTORICAL_BACKFILL_CURSOR_KEY = "historical-backfill:cursor";
+
+interface HistoricalBackfillCursorState {
+  /** When the current walk started from the front of the queue. */
+  sweepStartedAt: string;
+  after: HistoricalBackfillCursor | null;
+}
+
 async function backfillHistoricalPublicFacts(
   env: Env
 ): Promise<{ events: number; facts: number; errors: string[] }> {
   const now = new Date();
   const olderThan = new Date(now.getTime() - 36 * 60 * 60 * 1000).toISOString();
-  const targets = await getHistoricalBackfillTargets(env.DB, olderThan, 3);
+  // Almost every queued event is already backfilled, and "has no backfill fact"
+  // cannot be indexed, so each run resumes the walk where the previous one
+  // ended. Once a day the walk starts over, for events that became publishable
+  // (or failed) after the cursor had passed them.
+  const stored = await readStatsCache<HistoricalBackfillCursorState>(env.DB, HISTORICAL_BACKFILL_CURSOR_KEY);
+  const fresh = stored && now.getTime() - Date.parse(stored.payload.sweepStartedAt) < 24 * 60 * 60 * 1000;
+  const sweepStartedAt = fresh ? stored.payload.sweepStartedAt : now.toISOString();
+  const after = fresh ? stored.payload.after : null;
+  const limit = 3;
+  const targets = await getHistoricalBackfillTargets(env.DB, olderThan, limit, after);
+  const last = targets.at(-1);
+  // A short page means the queue is exhausted up to the 36-hour boundary.
+  const next: HistoricalBackfillCursor = targets.length < limit || !last
+    ? { sortAt: olderThan, id: 0 }
+    : { sortAt: last.backfill_sort_at, id: last.id };
+  await writeStatsCache(env.DB, HISTORICAL_BACKFILL_CURSOR_KEY, { sweepStartedAt, after: next } satisfies HistoricalBackfillCursorState, now.toISOString());
   let events = 0;
   let facts = 0;
   const errors: string[] = [];
@@ -1041,9 +1064,14 @@ export async function runAlertCheck(env: Env): Promise<WorkflowRunSummary> {
     const backfill = await backfillUnlinkedEvents(env);
     summary.errors.push(...backfill.errors);
 
-    const qualityBackfill = await backfillLinkedCandidateQuality(env);
-    summary.itemsClassified += qualityBackfill.assessed;
-    summary.errors.push(...qualityBackfill.errors);
+    // Ingest creates candidates itself; this only catches leftovers. Its lookup
+    // ("no candidate yet") cannot use an index and reads every linked item, so
+    // it runs in the first cron slot of each hour only.
+    if (new Date().getUTCMinutes() < 15) {
+      const qualityBackfill = await backfillLinkedCandidateQuality(env);
+      summary.itemsClassified += qualityBackfill.assessed;
+      summary.errors.push(...qualityBackfill.errors);
+    }
 
     const intelligenceBackfill = await backfillEventIntelligence(env);
     summary.errors.push(...intelligenceBackfill.errors);

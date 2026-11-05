@@ -29,7 +29,7 @@ import type {
   StoredAlertItem
 } from "./types";
 import { canonicalSourceUrl, classifySource } from "./intelligence";
-import { attachPublicMapCoords, parsePublicFeedCursor, publicFeedCursor, toPublicFeedItem } from "./publication";
+import { attachPublicMapCoords, toPublicFeedItem } from "./publication";
 import type { HistoricalBackfillTarget } from "./historical-backfill";
 
 function changes(result: D1Result<unknown>): number {
@@ -719,17 +719,29 @@ export async function insertOutageFacts(
   }
 }
 
+/** Position in the backfill queue (COALESCE(received_at, first_seen_at), id); the walk resumes after it. */
+export interface HistoricalBackfillCursor {
+  sortAt: string;
+  id: number;
+}
+
 export async function getHistoricalBackfillTargets(
   db: D1Database,
   olderThan: string,
-  limit = 3
+  limit = 3,
+  after: HistoricalBackfillCursor | null = null
 ): Promise<HistoricalBackfillTarget[]> {
+  // Without a cursor the walk passes every already backfilled event (an
+  // anti-join cannot be indexed); with one it starts where the last run ended.
   const result = await db.prepare(
     `SELECT event.*,
             source.id AS backfill_source_id,
-            source.source_url AS backfill_source_url
+            source.source_url AS backfill_source_url,
+            COALESCE(event.received_at, event.first_seen_at) AS backfill_sort_at
      FROM outage_events event
-     INNER JOIN publication_decisions decision
+     -- CROSS JOIN keeps the queue index (idx_outage_events_backfill_queue) as the
+     -- outer loop; driven from publication_decisions it reads every decision.
+     CROSS JOIN publication_decisions decision
        ON decision.outage_event_id = event.id AND decision.publishable = 1
      INNER JOIN outage_sources source ON source.id = (
        SELECT candidate.id
@@ -741,6 +753,11 @@ export async function getHistoricalBackfillTargets(
      WHERE event.country = 'CH'
        AND event.status != 'dismissed' AND event.origin != 'operator'
        AND COALESCE(event.received_at, event.first_seen_at) < ?
+       ${after
+         // The >= term is the index range start; the row value skips the ids already passed.
+         ? `AND COALESCE(event.received_at, event.first_seen_at) >= ?
+            AND (COALESCE(event.received_at, event.first_seen_at), event.id) > (?, ?)`
+         : ""}
        AND NOT EXISTS (
          SELECT 1 FROM outage_facts fact
          WHERE fact.outage_event_id = event.id
@@ -748,7 +765,12 @@ export async function getHistoricalBackfillTargets(
        )
      ORDER BY COALESCE(event.received_at, event.first_seen_at) ASC, event.id ASC
      LIMIT ?`
-  ).bind(olderThan, "historical-backfill/v1", Math.max(1, Math.min(5, limit))).all<HistoricalBackfillTarget>();
+  ).bind(
+    olderThan,
+    ...(after ? [after.sortAt, after.sortAt, after.id] : []),
+    "historical-backfill/v1",
+    Math.max(1, Math.min(5, limit))
+  ).all<HistoricalBackfillTarget>();
   return result.results;
 }
 
@@ -978,54 +1000,6 @@ export async function recordEventSourcePresence(
          time_confidence = CASE WHEN time_confidence = 'inferred' THEN 'reported' ELSE time_confidence END
      WHERE id = ?`
   ).bind(observedAt, observedAt, eventId).run();
-}
-
-export async function reconcileSourcePresence(
-  db: D1Database,
-  sourceRegistryId: number,
-  checkedAt: string,
-  presentEventIds: number[]
-): Promise<void> {
-  // The present ids travel as one JSON parameter (D1 allows only 100 bound
-  // parameters), and rows stop counting once they reached the closing
-  // threshold of 2, so long-gone events are not rewritten on every run.
-  await db.prepare(
-    `UPDATE outage_event_source_presence
-     SET first_missing_at = COALESCE(first_missing_at, ?),
-         consecutive_missing_checks = consecutive_missing_checks + 1,
-         updated_at = CURRENT_TIMESTAMP
-     WHERE source_registry_id = ?
-       AND consecutive_missing_checks < 2
-       AND outage_event_id NOT IN (SELECT value FROM json_each(?))`
-  ).bind(checkedAt, sourceRegistryId, JSON.stringify(presentEventIds)).run();
-
-  // The end of an auto-closed outage is bracketed by the polling cadence: it was
-  // still listed at the last confirmation and gone at the first missing check.
-  // Keeping that window (instead of NULL) is what makes duration statistics possible.
-  await db.prepare(
-    `UPDATE outage_events
-     SET status = 'resolved',
-         resolution_earliest_at = (
-           SELECT MAX(p.last_confirmed_at) FROM outage_event_source_presence p
-           WHERE p.outage_event_id = outage_events.id
-         ),
-         resolution_latest_at = (
-           SELECT MAX(p.first_missing_at) FROM outage_event_source_presence p
-           WHERE p.outage_event_id = outage_events.id
-         ),
-         time_confidence = 'inferred',
-         updated_at = CURRENT_TIMESTAMP
-     WHERE status NOT IN ('dismissed', 'resolved')
-       AND id IN (
-         SELECT outage_event_id FROM outage_event_source_presence
-         WHERE source_registry_id = ?
-       )
-       AND NOT EXISTS (
-         SELECT 1 FROM outage_event_source_presence p
-         WHERE p.outage_event_id = outage_events.id
-           AND p.consecutive_missing_checks < 2
-       )`
-  ).bind(sourceRegistryId).run();
 }
 
 export async function markOutageEventEmailSent(
@@ -1863,131 +1837,6 @@ export async function getPublicationEvidenceForEvents(
   return { sources, facts };
 }
 
-export async function getPublicFeedItems(
-  db: D1Database,
-  input: { limit?: number; before?: string | null } = {}
-): Promise<{ items: PublicFeedItem[]; next_cursor: string | null }> {
-  const requestedLimit = Number(input.limit ?? 10);
-  const limit = Math.max(1, Math.min(40, Math.floor(Number.isFinite(requestedLimit) ? requestedLimit : 10)));
-  const cursor = parsePublicFeedCursor(input.before);
-  const result = await db
-    .prepare(
-      `SELECT event.*, decision.trust AS publication_trust,
-              decision.public_summary AS publication_summary,
-              decision.primary_source_publisher, decision.primary_source_url,
-              decision.primary_source_domain, decision.reasons_json,
-              loc.latitude AS map_latitude,
-              loc.longitude AS map_longitude,
-              loc.precision AS map_precision,
-              COALESCE(
-                event.started_at_estimate,
-                event.resolved_at_estimate,
-                event.received_at,
-                event.created_at,
-                event.first_seen_at
-              ) AS feed_sort_at
-       FROM outage_events event
-       INNER JOIN publication_decisions decision ON decision.outage_event_id = event.id
-       LEFT JOIN event_public_locations loc ON loc.outage_event_id = event.id
-       WHERE decision.publishable = 1
-         AND event.status != 'dismissed'
-         AND event.country = 'CH'
-         AND (
-           (? IS NULL AND 1 = 1)
-           OR (
-             NOT (event.outage_nature = 'planned' AND julianday(event.started_at_estimate) > julianday('now'))
-             AND COALESCE(
-               event.started_at_estimate,
-               event.resolved_at_estimate,
-               event.received_at,
-               event.created_at,
-               event.first_seen_at
-             ) < ?
-           )
-           OR (
-             NOT (event.outage_nature = 'planned' AND julianday(event.started_at_estimate) > julianday('now'))
-             AND
-             COALESCE(
-               event.started_at_estimate,
-               event.resolved_at_estimate,
-               event.received_at,
-               event.created_at,
-               event.first_seen_at
-             ) = ?
-             AND event.id < ?
-           )
-         )
-       ORDER BY
-         CASE WHEN event.outage_nature = 'planned'
-           AND julianday(event.started_at_estimate) > julianday('now') THEN 0 ELSE 1 END,
-         CASE WHEN event.outage_nature = 'planned'
-           AND julianday(event.started_at_estimate) > julianday('now') THEN event.started_at_estimate END ASC,
-         COALESCE(
-           event.started_at_estimate,
-           event.resolved_at_estimate,
-           event.received_at,
-           event.created_at,
-           event.first_seen_at
-         ) DESC,
-         event.id DESC
-       LIMIT ?`
-    )
-    .bind(
-      cursor?.receivedAt ?? null,
-      cursor?.receivedAt ?? null,
-      cursor?.receivedAt ?? null,
-      cursor?.id ?? null,
-      limit
-    )
-    .all<OutageEvent & {
-      publication_trust: "official" | "corroborated" | "reported";
-      publication_summary: string;
-      primary_source_publisher: string;
-      primary_source_url: string;
-      primary_source_domain: string;
-      reasons_json: string;
-      feed_sort_at: string;
-      map_latitude: number | null;
-      map_longitude: number | null;
-      map_precision: PublicFeedItem["map_precision"];
-    }>();
-
-  const evidence = await getPublicationEvidenceForEvents(db, result.results.map((row) => row.id));
-  const entries = result.results.flatMap((row) => {
-    const item = attachPublicMapCoords(
-      toPublicFeedItem(
-        row,
-        {
-          publishable: true,
-          trust: row.publication_trust,
-          reasons: [],
-          summary: row.publication_summary,
-          primary_source: {
-            publisher: row.primary_source_publisher,
-            url: row.primary_source_url,
-            domain: row.primary_source_domain
-          }
-        },
-        evidence.facts.get(row.id) ?? []
-      ),
-      {
-        latitude: row.map_latitude,
-        longitude: row.map_longitude,
-        precision: row.map_precision
-      }
-    );
-    return item ? [{ item, sortAt: row.feed_sort_at }] : [];
-  });
-  const items = entries.map((entry) => entry.item);
-  const lastEntry = entries.at(-1);
-  return {
-    items,
-    next_cursor: items.length === limit && lastEntry
-      ? publicFeedCursor({ id: lastEntry.item.id, received_at: lastEntry.sortAt })
-      : null
-  };
-}
-
 export async function getPublicFeedItem(db: D1Database, eventId: number): Promise<PublicFeedItem | null> {
   const [row, evidence] = await Promise.all([db
     .prepare(
@@ -2048,7 +1897,8 @@ export async function getUnplannedEventsDueForResearchRefresh(
   const result = await db.prepare(
     `SELECT event.*
      FROM outage_events event
-     INNER JOIN publication_decisions decision ON decision.outage_event_id = event.id
+     -- Outer loop: open unplanned events of the last day (idx_outage_events_open_unplanned).
+     CROSS JOIN publication_decisions decision ON decision.outage_event_id = event.id
      WHERE decision.publishable = 1
        AND event.country = 'CH'
        AND event.status NOT IN ('dismissed', 'resolved') AND event.origin != 'operator'

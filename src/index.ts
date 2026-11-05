@@ -2,7 +2,6 @@ import {
   dismissOutageEvent,
   getDebugStatus,
   getMergeSuggestionsForEvent,
-  getPublicFeedItems,
   getPublicStatus,
   getRecentItems,
   getSnapshotsNeedingPublicDigest,
@@ -465,9 +464,7 @@ const app = {
       const requestedLimit = Number(url.searchParams.get("limit") ?? 10);
       const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(40, Math.floor(requestedLimit))) : 10;
       const before = url.searchParams.get("before");
-      let feed = await listPublicFeed(env.DB, { limit, before });
-      // Bridge for the minutes between a fresh deploy and the first projection refresh.
-      if (!feed.items.length && !before) feed = await getPublicFeedItems(env.DB, { limit });
+      const feed = await listPublicFeed(env.DB, { limit, before });
       return cachePublic(json({ ...feed, generated_at: new Date().toISOString() }), request, ctx, CACHE.api);
     }
 
