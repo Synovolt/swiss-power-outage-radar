@@ -450,8 +450,14 @@ export function recordsFromObservations(observations: SourceObservationInput[]):
     const place = textOrNull(observation.locationText);
     const start = isoOrNull(observation.startedAt);
     const end = isoOrNull(observation.resolvedAt);
-    const identityText = start ? keyText(place) : keyText(observation.title.replace(/^(?:behoben\w*|beendet\w*)\s+/i, ""));
     const raw = observation.rawPayloadJson ? safeJson(observation.rawPayloadJson) : null;
+    // Adapters whose lists hold several items per place and start (IWB streets,
+    // Kreuzlingen notices) pass the operator's own wording as raw.identity.
+    const explicitIdentity = raw && typeof raw === "object" && typeof (raw as { identity?: unknown }).identity === "string"
+      ? keyText((raw as { identity: string }).identity)
+      : "";
+    const identityText = explicitIdentity
+      || (start ? keyText(place) : keyText(observation.title.replace(/^(?:behoben\w*|beendet\w*)\s+/i, "")));
     // Adapters that know the street or building pass it as raw.detail (ewl).
     const detail = raw && typeof raw === "object" && typeof (raw as { detail?: unknown }).detail === "string"
       ? textOrNull((raw as { detail: string }).detail)
