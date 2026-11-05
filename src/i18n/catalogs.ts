@@ -252,11 +252,15 @@ export const de = {
       },
       "3": {
         q: "Wie entscheidet outage.ch, welche Meldungen öffentlich sind?",
-        a: "Ein Ereignis wird nur veröffentlicht, wenn mindestens eine offizielle Netzbetreiber- oder Behördenquelle vorliegt oder mindestens zwei unabhängige glaubwürdige Quellen dasselbe Ereignis belegen. Einzelne unbestätigte Hinweise bleiben unsichtbar."
+        a: "Ein Ereignis wird nur veröffentlicht, wenn mindestens eine offizielle Netzbetreiber- oder Behördenquelle vorliegt oder mindestens zwei unabhängige glaubwürdige Quellen dasselbe Ereignis belegen. Ein einzelner Medienbericht über einen konkreten Ausfall erscheint als «Öffentlich gemeldet» und gilt höchstens 6 Stunden als aktiv. Andere unbestätigte Hinweise bleiben unsichtbar."
       },
       "4": {
         q: "Nennt outage.ch eine genaue Wiederherstellungszeit?",
         a: "Nur wenn eine öffentliche Quelle sie bestätigt. Fehlende Endzeiten werden als offen gekennzeichnet. Schätzungen werden nicht als Tatsache dargestellt."
+      },
+      "5": {
+        q: "Deckt outage.ch die ganze Schweiz ab?",
+        a: "Noch nicht. Gut abgedeckt sind die Gebiete von BKW, Romande Energie, ewl Luzern, SES, AIL und weiteren Werken mit öffentlichen Störungsseiten. Viele Werke, etwa in Zürich, der Zentral- und Ostschweiz, veröffentlichen keine maschinenlesbaren Meldungen. Keine Meldung auf outage.ch heisst dort nicht, dass es keinen Ausfall gibt: Massgebend ist die Seite Ihres Netzbetreibers."
       }
     }
   },
@@ -411,7 +415,7 @@ export const de = {
     s1p1: "Jede öffentliche Vorfallsseite nennt Ort, Art, Status, belegte Zeiten, Ursache soweit bekannt und die Originalquellen.",
     s1p2: "Der Radar auf der Startseite bündelt aktuelle, bevorstehende, behobene und historische Meldungen. Geplante Unterbrüche erscheinen nach ihrem angekündigten Beginn. Unbelegte Schätzungen zur Wiederherstellung werden nicht als Tatsache dargestellt.",
     s2h: "Quellenregel",
-    s2p1: "Ein Ereignis wird nur veröffentlicht, wenn mindestens eine offizielle Netzbetreiber- oder Behördenquelle vorliegt oder mindestens zwei unabhängige glaubwürdige Quellen dasselbe Ereignis belegen. Ein einzelner Medien- oder Alert-Hinweis bleibt intern.",
+    s2p1: "Ein Ereignis wird nur veröffentlicht, wenn mindestens eine offizielle Netzbetreiber- oder Behördenquelle vorliegt oder mindestens zwei unabhängige glaubwürdige Quellen dasselbe Ereignis belegen. Ein einzelner Medienbericht erscheint nur, wenn er konkret von einem Stromausfall an einem bestimmten Ort handelt: gekennzeichnet als «Öffentlich gemeldet» und ohne neue Bestätigung höchstens 6 Stunden als aktiv. Einzelne Alert-Hinweise bleiben intern.",
     s2p2: "Google Alerts dienen der Entdeckung, nicht als Wahrheit. Direkte Betreiberseiten, Störungskarten und Behördenkanäle haben Vorrang. Relevante Seiten werden intern archiviert; öffentlich sichtbar bleibt nur, was zum veröffentlichten Ereignis gehört.",
     s2p3: "Alertswiss wird über den öffentlichen JSON-Feed gelesen, aber nur für strombezogene Warnungen. Testmeldungen und andere Lagen wie Feuerverbote bleiben aussen vor. outage.ch übernimmt keine Alertswiss-Volltexte; zitiert wird mit «Quelle: www.alertswiss.ch». Die Daten stehen unter CC BY-NC-SA 2.5 CH.",
     s3h: "ElCom-Kennzahlen auf Betreiberseiten",
@@ -684,11 +688,15 @@ export const fr: Catalog = {
       },
       "3": {
         q: "Comment outage.ch décide-t-il quelles annonces sont publiques ?",
-        a: "Un événement n'est publié que s'il existe au moins une source officielle de réseau ou d'autorité, ou au moins deux sources crédibles indépendantes. Les indices isolés non confirmés restent invisibles."
+        a: "Un événement n'est publié que s'il existe au moins une source officielle de réseau ou d'autorité, ou au moins deux sources crédibles indépendantes. Un article de presse isolé sur une panne concrète apparaît comme « Signalée publiquement » et reste actif au plus 6 heures. Les autres indices non confirmés restent invisibles."
       },
       "4": {
         q: "outage.ch indique-t-il une heure de rétablissement précise ?",
         a: "Seulement si une source publique la confirme. Les heures de fin manquantes sont marquées comme ouvertes. Les estimations ne sont pas présentées comme des faits."
+      },
+      "5": {
+        q: "outage.ch couvre-t-il toute la Suisse ?",
+        a: "Pas encore. Les zones de BKW, Romande Energie, ewl Lucerne, SES, AIL et d'autres gestionnaires publiant leurs dérangements sont bien couvertes. Beaucoup de gestionnaires, par exemple à Zurich, en Suisse centrale et orientale, ne publient pas de signalements exploitables. Là-bas, l'absence de signalement sur outage.ch ne signifie pas qu'il n'y a pas de panne : la page de votre gestionnaire de réseau fait foi."
       }
     }
   },
@@ -843,7 +851,7 @@ export const fr: Catalog = {
     s1p1: "Chaque page d'incident publique indique le lieu, le type, le statut, les horaires étayés, la cause si elle est connue et les sources originales.",
     s1p2: "Le radar de la page d'accueil rassemble les annonces actuelles, à venir, rétablies et historiques. Les interruptions planifiées apparaissent après le début annoncé. Les estimations non étayées de rétablissement ne sont pas présentées comme des faits.",
     s2h: "Règle des sources",
-    s2p1: "Un événement n'est publié que s'il existe au moins une source officielle de réseau ou d'autorité, ou au moins deux sources crédibles indépendantes. Un indice médiatique ou d'alerte isolé reste interne.",
+    s2p1: "Un événement n'est publié que s'il existe au moins une source officielle de réseau ou d'autorité, ou au moins deux sources crédibles indépendantes. Un article de presse isolé n'apparaît que s'il traite concrètement d'une panne à un endroit précis : il est marqué « Signalée publiquement » et reste actif au plus 6 heures sans nouvelle confirmation. Les alertes isolées restent internes.",
     s2p2: "Les Google Alerts servent à la découverte, pas de vérité. Les pages d'exploitants, cartes de pannes et canaux officiels ont priorité. Les pages pertinentes sont archivées en interne; seul ce qui appartient à l'événement publié est visible.",
     s2p3: "Alertswiss est lu via le flux JSON public, uniquement pour les alertes liées à l'électricité. Les messages de test et d'autres situations comme les interdictions de feu restent exclus. outage.ch ne reprend pas les textes intégraux Alertswiss; la citation est «Source: www.alertswiss.ch». Les données sont sous CC BY-NC-SA 2.5 CH.",
     s3h: "Indicateurs ElCom sur les pages d'exploitants",

@@ -551,6 +551,9 @@ export async function refreshIncidents(
       const records = recordsByEvent.get(event.id) ?? [];
       if (records.length === 0) continue;
       const derived = deriveIncident(records, { id: source.id, operator_name: source.operator_name, url: source.url });
+      // Records without coordinates yield no canton; keep the one the projection
+      // backfilled instead of wiping it (and rewriting the event) on every poll.
+      if (derived.canton === null && event.canton !== null) derived.canton = event.canton;
       const material = JSON.stringify(materialFields(derived)) !== JSON.stringify(storedMaterialFields(event));
       const touch = derived.lastConfirmedActiveAt !== null && (
         !event.last_confirmed_active_at ||

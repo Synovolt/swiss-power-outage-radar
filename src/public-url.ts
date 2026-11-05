@@ -16,6 +16,8 @@ export function publicDisplayLocation(value: string | null | undefined): string 
     .replace(/^\s*(?:behobener?|beendeter?|geplanter?)\s+(?:stromausfall|stromunterbruch)\s+(?:in|im|bei|à)\s+/i, "")
     .replace(/^\s*(?:stromausfall|stromunterbruch|panne de courant)\s+(?:in|im|bei|à)\s+/i, "")
     .replace(/^\s*(?:in|im|bei|à)\s+/i, "")
+    // "2608 Courtelary": the postal code is not part of the place name.
+    .replace(/^\s*\d{4}\s+(?=\p{L})/u, "")
     .replace(/\s+/g, " ")
     .trim();
   return cleaned || (value ?? "").trim() || "Schweiz";

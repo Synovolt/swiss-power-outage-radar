@@ -159,11 +159,15 @@ function requiresItemLevelAdapter(source: SourceRegistryEntry, config: AdapterCo
   return true;
 }
 
-function explicitLocation(text: string): string | null {
+// "in Betrieb genommen", "in Kürze", "in Absprache": capitalised nouns after "in" that are not places.
+const NOT_A_PLACE_START = /^(?:Betrieb|Kürze|Kuerze|Absprache|Zusammenarbeit|Folge|Ordnung|Arbeit|Bearbeitung|Abklärung|Abklaerung|Planung|Kraft|Teilen|Gebieten|Bezug|Richtung|Ausnahmefällen|Einzelfällen|Notfällen|Ihrem|Ihrer|Ihren|Unserem|Unserer)\b/;
+
+export function explicitLocation(text: string): string | null {
   const match = text.match(/(?:^|\s)(?:in|für|fuer|betroffen(?:e)?|commune de|à|a)\s+([A-ZÄÖÜ][A-Za-zÀ-ÿÄÖÜäöü' -]{2,60})/);
-  return match?.[1]
-    ? compact(match[1].replace(/\b(?:ist|sind|wurde|wurden|kam|kommt|seit|am|vom)\b.*$/i, ""))
-    : null;
+  if (!match?.[1] || NOT_A_PLACE_START.test(match[1])) return null;
+  // Cut at the first verb or function word: "Saanen kann es zu …" → "Saanen".
+  const place = compact(match[1].replace(/\s(?:ist|sind|wurde|wurden|wird|werden|kam|kommt|kann|können|koennen|muss|müssen|hat|haben|bleibt|gibt|es|zu|seit|am|vom|bis|ab|wegen|genommen)\b.*$/i, ""));
+  return place.length >= 2 ? place : null;
 }
 
 function likelyLocation(text: string, source: SourceRegistryEntry): string | null {
@@ -445,7 +449,7 @@ async function parseBkwPayload(
         return makeKnownObservation(source, {
           status: cluster.status,
           title,
-          text: compact(`${title}. ${cluster.items.length} Trafostationen betroffen${names ? `: ${names}` : ""}.`),
+          text: compact(`${title}. ${cluster.items.length} ${cluster.items.length === 1 ? "Trafostation" : "Trafostationen"} betroffen${names ? `: ${names}` : ""}.`),
           location: cluster.location,
           observedAt,
           startedAt: earliestIso(cluster.items.map((item) => item.startedAt)),
@@ -690,6 +694,8 @@ async function parseEwlHtml(
     const titles = [...block.matchAll(/class="[^"]*disturbances__title[^"]*"[^>]*>([\s\S]*?)<\/p>/gi)]
       .map((match) => compact(stripHtml(match[1] ?? "")));
     const place = titles[0];
+    // The line under the place names the street or building ("Fluhmattstrasse 1").
+    const detail = compact(stripHtml(block.match(/disturbances__title[^"]*"[^>]*>[\s\S]*?<\/p>\s*<p class="subtitle">([\s\S]*?)<\/p>/i)?.[1] ?? "")) || null;
     const when = titles[1] ?? "";
     const utility = titles[2] ?? "";
     if (!place || isNonElectricUtility(utility || compact(stripHtml(block)))) continue;
@@ -713,7 +719,7 @@ async function parseEwlHtml(
       startedAt: range.startedAt,
       // For announced works the range end is the planned end (records keep it as reported_end_at).
       resolvedAt: resolved || planned ? range.resolvedAt : null,
-      raw: { adapter: "ewl-disturbances", excerpt: rowText.slice(0, 2000) }
+      raw: { adapter: "ewl-disturbances", excerpt: rowText.slice(0, 2000), detail }
     }));
   }
   return { observations, schemaMatched: true };

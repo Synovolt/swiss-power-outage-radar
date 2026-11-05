@@ -283,7 +283,9 @@ export function buildStatsPage(stats: StatsPayload | null, locale: AppLocale, no
     if (!heatPeak || count > heatPeak.count) heatPeak = { day: dayIndex, hour, count };
   }));
   const peak = heatPeak as { day: number; hour: number; count: number } | null;
-  const heatTakeaway = stats.weekdayHourN >= 8 && peak && peak.count > 0
+  // Only name a peak that stands out: at least 3 starts and no other hour as frequent.
+  const peakTies = peak ? stats.weekdayHour.flat().filter((count) => count === peak.count).length : 0;
+  const heatTakeaway = stats.weekdayHourN >= 8 && peak && peak.count >= 3 && peakTies === 1
     ? s("heatTakeaway", { weekday: weekdays[peak.day] ?? "", from: String(peak.hour).padStart(2, "0"), to: String((peak.hour + 1) % 24).padStart(2, "0") })
     : undefined;
   const heat = stats.weekdayHourN >= 8
@@ -344,7 +346,7 @@ export function buildStatsPage(stats: StatsPayload | null, locale: AppLocale, no
     })
     + `<section class="dp-kpis">`
     + kpi(s("kpi30"), number(totals.last30, locale), s("kpi30Delta", { delta: deltaText }))
-    + kpi(s("kpiShareUnplanned"), unplannedShare === null ? "–" : `${unplannedShare}%`, s("kpiShareNote", { planned: number(totals.last30Planned, locale) }))
+    + kpi(s("kpiShareUnplanned"), unplannedShare === null ? "–" : `${unplannedShare}%`, s("kpiShareNote", { unplanned: number(totals.last30Unplanned, locale), total: number(totals.last30, locale) }))
     + kpi(s("kpiMedianUnplanned"), minutesText(unplanned.median, locale), s("kpiMedianNote", { count: unplanned.n }))
     + kpi(s("kpiLead"), hoursText(lead.median, locale), s("kpiLeadNote"))
     + `</section>`

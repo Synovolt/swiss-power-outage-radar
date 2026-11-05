@@ -65,6 +65,18 @@ function statusText(detail: PublicEventDetail, locale: AppLocale = "de"): string
   return t(locale, "status.unknown");
 }
 
+/**
+ * An end observed between two polls of the operator page: last seen listed
+ * (from) and first seen gone (to). Only then can the page say "ended between".
+ */
+function measuredEndWindow(detail: PublicEventDetail): { from: number; to: number } | null {
+  const item = detail.item;
+  if (item.status !== "resolved" || item.resolved_at) return null;
+  const to = toMs(item.resolution_latest_at);
+  const from = toMs(item.resolution_earliest_at) ?? toMs(item.last_confirmed_active_at);
+  return to !== null && from !== null && from <= to ? { from, to } : null;
+}
+
 function isAutoClosed(detail: PublicEventDetail): boolean {
   return detail.item.status === "resolved" &&
     detail.item.time_confidence === "inferred" &&
@@ -460,6 +472,14 @@ function headline(detail: PublicEventDetail, locale: AppLocale, now: number): { 
   }
 
   if (item.status === "resolved") {
+    const measured = measuredEndWindow(detail);
+    if (measured) {
+      return {
+        main: h("endedBetween", { from: whenText(measured.from, now, locale), to: endText(measured.to, measured.from, now, locale) }),
+        sub: h("endMeasured"),
+        liveSince: null
+      };
+    }
     if (isAutoClosed(detail)) {
       const main = lastConfirmed !== null ? h("autoClosed", { date: whenText(lastConfirmed, now, locale) }) : h("autoClosedNoDate");
       return { main, sub: statusLine(detail, locale), liveSince: null };
@@ -511,7 +531,8 @@ function renderFacts(detail: PublicEventDetail, locale: AppLocale, now: number, 
   const rows: Array<[string, string, string?]> = [];
 
   // "≤": an operator outage without a reported start began no later than its first sighting.
-  const firstSeen = item.active_since_is_minimum ? toMs(item.active_since_at) : null;
+  // Without that, the moment outage.ch received the report is still an upper bound.
+  const firstSeen = item.active_since_is_minimum ? toMs(item.active_since_at) : toMs(item.received_at);
   rows.push(start !== null
     ? [f("start"), whenText(start, now, locale)]
     : firstSeen !== null
@@ -524,6 +545,9 @@ function renderFacts(detail: PublicEventDetail, locale: AppLocale, now: number, 
       : [f("end"), f("open"), "is-open"]);
   } else if (resolved !== null) {
     rows.push([f("end"), whenText(resolved, now, locale)]);
+  } else if (measuredEndWindow(detail)) {
+    const measured = measuredEndWindow(detail) as { from: number; to: number };
+    rows.push([f("end"), `${whenText(measured.from, now, locale)}–${endText(measured.to, measured.from, now, locale)}`]);
   } else if (item.status === "resolved" && toMs(item.resolution_latest_at) !== null) {
     // Measured end window: gone from the operator listing no later than this poll.
     rows.push([f("end"), `≤ ${whenText(toMs(item.resolution_latest_at) as number, now, locale)}`]);

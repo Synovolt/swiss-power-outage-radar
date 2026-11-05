@@ -108,7 +108,7 @@ export function pathFor(route: AppRoute, locale: AppLocale = "de"): string {
 
 /** Static shells that only exist to be filled by the Worker; never served directly. */
 export function templateShellTarget(pathname: string): string | null {
-  const shell = pathname.match(/^(?:\/(fr|it|en))?\/(?:events|data-template)\/?$/);
+  const shell = pathname.match(/^(?:\/(fr|it|en))?\/(?:events|data-template|not-found)\/?$/);
   if (!shell) return null;
   return shell[1] ? `/${shell[1]}/` : "/";
 }
@@ -182,7 +182,12 @@ export function localizeRoute(route: AppRoute, locale: AppLocale): AppRoute {
   return canton ? { kind: "canton", slug: cantonSlug(canton, locale) } : route;
 }
 
+/** Static pages with the same path in every locale (imprint, privacy). */
+const SAME_PATH_PAGES = /^\/(?:impressum|datenschutz)\/?$/;
+
 export function alternatePath(pathname: string, target: AppLocale): string {
+  const { rest } = stripLocalePrefix(pathname);
+  if (SAME_PATH_PAGES.test(rest)) return `${localePrefix(target)}${rest.endsWith("/") ? rest : `${rest}/`}`;
   const parsed = parseAppPath(pathname);
   if (!parsed) return pathFor({ kind: "home" }, target);
   if (parsed.route.kind === "guide") {

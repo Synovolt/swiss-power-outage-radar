@@ -46,7 +46,7 @@ export interface RadarCopy {
   /** Kind of event as a noun: "Stromausfall" / "Geplanter Unterbruch". */
   kind: { planned: string; unplanned: string };
   /** Labels next to the live counters on the home page (singular/plural). */
-  tiles: { activeOne: string; activeOther: string; plannedOne: string; plannedOther: string };
+  tiles: { activeOne: string; activeOther: string; plannedOne: string; plannedOther: string; runningOne: string; runningOther: string };
   historyLink: string;
   countOne: string;
   countOther: string;

@@ -1,5 +1,6 @@
 import { classifySource } from "./intelligence";
 import { normalizeLocation } from "./events";
+import { stripPageMetadata } from "./source-text";
 import type {
   AiClassification,
   CandidateAssessment,
@@ -129,7 +130,7 @@ function includesAny(text: string, terms: string[]): boolean {
 }
 
 function bestEvidenceText(item: NormalizedRssItem, snapshot?: SourceSnapshot | null): string {
-  const snapshotText = compact(snapshot?.markdown_excerpt);
+  const snapshotText = compact(stripPageMetadata(snapshot?.markdown_excerpt));
   if (snapshotText && includesAny(snapshotText, OUTAGE_TERMS)) return snapshotText;
   return compact([item.title, item.source, item.snippet].filter(Boolean).join(". "));
 }

@@ -5,6 +5,7 @@
  * the compact index for instant client-side search, and a meta description
  * with today's numbers.
  */
+import { IMPRINT_PATH, LEGAL_LABELS, PRIVACY_PATH, legalPath } from "./legal";
 import { escapeHtml, fetchTemplate, inlineJson, renderedHeaders, setMetaContent } from "./html";
 import { formatAppDate, homeFaqs, pathFor, radarViewCopy, t, type AppLocale } from "./i18n";
 import { DEFAULT_OG_IMAGE_PATH, SITE_ORIGIN, absoluteUrl } from "./public-url";
@@ -22,9 +23,14 @@ import {
 import type { PublicIndexPayload } from "./public-stats";
 import type { Env } from "./types";
 
-export function homeLiveCounts(items: RadarItem[], now = Date.now()): { active: number; upcoming: number } {
+/**
+ * "active" counts outages only. Planned works whose window is running are
+ * "running": they are not a disturbance and are shown separately.
+ */
+export function homeLiveCounts(items: RadarItem[], now = Date.now()): { active: number; running: number; upcoming: number } {
   return {
-    active: items.filter((item) => item.status === "active").length,
+    active: items.filter((item) => item.status === "active" && item.nature !== "planned").length,
+    running: items.filter((item) => item.status === "active" && item.nature === "planned").length,
     upcoming: items.filter((item) => item.status === "upcoming" && inView(item, "now", now)).length
   };
 }
@@ -64,6 +70,7 @@ export function renderHomeAbout(locale: AppLocale): string {
     + `<ul class="radar-about__links">${links.map(([href, label]) => `<li><a href="${escapeHtml(href)}">${escapeHtml(label)}</a></li>`).join("")}</ul>`
     + `<h3>${escapeHtml(t(locale, "home.seoFaq"))}</h3>`
     + homeFaqs(locale).map((faq) => `<details><summary>${escapeHtml(faq.question)}</summary><p>${escapeHtml(faq.answer)}</p></details>`).join("")
+    + `<p class="radar-about__legal"><a href="${escapeHtml(legalPath(IMPRINT_PATH, locale))}">${escapeHtml(LEGAL_LABELS[locale].imprint)}</a> · <a href="${escapeHtml(legalPath(PRIVACY_PATH, locale))}">${escapeHtml(LEGAL_LABELS[locale].privacy)}</a></p>`
     + `</section>`;
 }
 
@@ -126,6 +133,14 @@ export async function renderHomeSeoAsset(
       .on("[data-live]", {
         element(element) {
           if (live.active > 0) element.setAttribute("data-has-active", "");
+        }
+      })
+      .on("[data-live-running]", {
+        element(element) {
+          if (live.running > 0) {
+            element.setInnerContent(live.running === 1 ? copy.tiles.runningOne : copy.tiles.runningOther.replace("{{count}}", String(live.running)));
+            element.removeAttribute("hidden");
+          }
         }
       });
   }

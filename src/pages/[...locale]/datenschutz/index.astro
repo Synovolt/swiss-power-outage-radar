@@ -1,0 +1,122 @@
+---
+import RadarLayout from "../../../layouts/RadarLayout.astro";
+import PageHero from "@/components/app/PageHero.astro";
+import { Prose } from "@/components/starwind/prose";
+import { SITE_ORIGIN, absoluteUrl } from "../../../public-url";
+import { IMPRINT_PATH, LEGAL_ENTITY, LEGAL_LABELS, PRIVACY_PATH, legalPath } from "../../../legal";
+import { localeFromParam, localeStaticPaths, type AppLocale } from "../../../i18n";
+
+export function getStaticPaths() {
+  return localeStaticPaths();
+}
+
+const locale: AppLocale = Astro.props.locale ?? localeFromParam(
+  Array.isArray(Astro.params.locale) ? Astro.params.locale[0] : Astro.params.locale
+);
+const label = LEGAL_LABELS[locale];
+
+// Facts this page states, checked against the code (2026-11-04): no cookies,
+// no local storage, no analytics or ad scripts; the only third party the
+// browser contacts is swisstopo for map tiles; hosting and logs at Cloudflare.
+type Section = { h: string; p: string[] };
+const COPY: Record<AppLocale, { lede: string; updated: string; controllerH: string; sections: Section[] }> = {
+  de: {
+    lede: "Wie outage.ch mit Personendaten umgeht. Kurz: keine Cookies, kein Tracking, keine Werbung.",
+    updated: "Stand: 4. November 2026",
+    controllerH: "Verantwortliche Stelle",
+    sections: [
+      { h: "Besuch der Website", p: [
+        "outage.ch wird bei Cloudflare betrieben (Cloudflare, Inc., USA). Beim Aufruf einer Seite verarbeitet Cloudflare technisch notwendige Daten wie IP-Adresse, Zeitpunkt, aufgerufene Adresse und Browserangaben, um die Seite auszuliefern, vor Angriffen zu schützen und Fehler zu analysieren. Diese Protokolle werden nur kurzzeitig aufbewahrt und nicht zur Profilbildung verwendet.",
+        "Cloudflare kann Daten auch ausserhalb der Schweiz bearbeiten, insbesondere in den USA. Grundlage dafür sind das Swiss-U.S. Data Privacy Framework beziehungsweise Standardvertragsklauseln."
+      ] },
+      { h: "Keine Cookies, kein Tracking", p: [
+        "outage.ch setzt keine Cookies, speichert nichts im Browser und verwendet keine Analyse-, Werbe- oder Social-Media-Dienste."
+      ] },
+      { h: "Karte", p: [
+        "Die Karten laden ihre Kacheln direkt beim Bundesamt für Landestopografie swisstopo (vectortiles.geo.admin.ch). Dabei erhält swisstopo wie jeder Webserver Ihre IP-Adresse und Browserangaben. Es gelten die Datenschutzbestimmungen der Bundesverwaltung."
+      ] },
+      { h: "Kontakt per E-Mail", p: [
+        `Wenn Sie an ${LEGAL_ENTITY.email} schreiben, verwenden wir Ihre Angaben nur, um Ihr Anliegen zu beantworten, und löschen sie, wenn sie dafür nicht mehr nötig sind.`
+      ] },
+      { h: "Inhalte über Stromausfälle", p: [
+        "Die Meldungen stammen aus öffentlichen Quellen von Netzbetreibern, Behörden und Medien. Sie betreffen Orte und Netzgebiete, nicht Personen. Namen von Autorinnen und Autoren aus Medienartikeln werden nicht übernommen."
+      ] },
+      { h: "Ihre Rechte", p: [
+        `Sie können Auskunft über Ihre bei uns bearbeiteten Personendaten verlangen sowie deren Berichtigung oder Löschung. Schreiben Sie dazu an ${LEGAL_ENTITY.email}. Beschwerden können Sie beim Eidgenössischen Datenschutz- und Öffentlichkeitsbeauftragten (EDÖB) einreichen.`
+      ] }
+    ]
+  },
+  fr: {
+    lede: "Comment outage.ch traite les données personnelles. En bref : pas de cookies, pas de suivi, pas de publicité.",
+    updated: "État : 4 novembre 2026",
+    controllerH: "Responsable du traitement",
+    sections: [
+      { h: "Visite du site", p: [
+        "outage.ch est hébergé chez Cloudflare (Cloudflare, Inc., États-Unis). Lors de l'accès à une page, Cloudflare traite les données techniquement nécessaires (adresse IP, heure, adresse consultée, informations du navigateur) pour livrer la page, la protéger contre les attaques et analyser les erreurs. Ces journaux ne sont conservés que brièvement et ne servent pas au profilage.",
+        "Cloudflare peut traiter des données hors de Suisse, notamment aux États-Unis, sur la base du Swiss-U.S. Data Privacy Framework ou de clauses contractuelles types."
+      ] },
+      { h: "Pas de cookies, pas de suivi", p: ["outage.ch ne pose aucun cookie, n'enregistre rien dans le navigateur et n'utilise aucun service d'analyse, de publicité ou de réseaux sociaux."] },
+      { h: "Carte", p: ["Les cartes chargent leurs tuiles directement auprès de l'Office fédéral de topographie swisstopo (vectortiles.geo.admin.ch), qui reçoit comme tout serveur web votre adresse IP et les informations du navigateur."] },
+      { h: "Contact par e-mail", p: [`Si vous écrivez à ${LEGAL_ENTITY.email}, vos données servent uniquement à répondre à votre demande et sont supprimées lorsqu'elles ne sont plus nécessaires.`] },
+      { h: "Contenus sur les pannes", p: ["Les signalements proviennent de sources publiques (gestionnaires de réseau, autorités, médias). Ils concernent des lieux et des zones de réseau, pas des personnes. Les noms des auteurs d'articles ne sont pas repris."] },
+      { h: "Vos droits", p: [`Vous pouvez demander l'accès à vos données personnelles, leur rectification ou leur effacement en écrivant à ${LEGAL_ENTITY.email}. Vous pouvez déposer une plainte auprès du Préposé fédéral à la protection des données et à la transparence (PFPDT).`] }
+    ]
+  },
+  it: {
+    lede: "Come outage.ch tratta i dati personali. In breve: nessun cookie, nessun tracciamento, nessuna pubblicità.",
+    updated: "Stato: 4 novembre 2026",
+    controllerH: "Titolare del trattamento",
+    sections: [
+      { h: "Visita del sito", p: [
+        "outage.ch è ospitato da Cloudflare (Cloudflare, Inc., USA). All'apertura di una pagina Cloudflare tratta i dati tecnicamente necessari (indirizzo IP, ora, indirizzo richiesto, dati del browser) per consegnare la pagina, proteggerla da attacchi e analizzare errori. Questi log sono conservati solo brevemente e non servono alla profilazione.",
+        "Cloudflare può trattare dati anche fuori dalla Svizzera, in particolare negli USA, sulla base dello Swiss-U.S. Data Privacy Framework o di clausole contrattuali standard."
+      ] },
+      { h: "Nessun cookie, nessun tracciamento", p: ["outage.ch non imposta cookie, non salva nulla nel browser e non usa servizi di analisi, pubblicità o social media."] },
+      { h: "Mappa", p: ["Le mappe caricano le tessere direttamente dall'Ufficio federale di topografia swisstopo (vectortiles.geo.admin.ch), che come ogni server web riceve il suo indirizzo IP e i dati del browser."] },
+      { h: "Contatto via e-mail", p: [`Se scrive a ${LEGAL_ENTITY.email}, i suoi dati servono solo a rispondere e vengono cancellati quando non sono più necessari.`] },
+      { h: "Contenuti sulle interruzioni", p: ["Le segnalazioni provengono da fonti pubbliche (gestori di rete, autorità, media) e riguardano luoghi e zone di rete, non persone. I nomi degli autori degli articoli non vengono ripresi."] },
+      { h: "I suoi diritti", p: [`Può chiedere informazioni sui suoi dati personali, la loro rettifica o cancellazione scrivendo a ${LEGAL_ENTITY.email}. Può presentare reclamo all'Incaricato federale della protezione dei dati e della trasparenza (IFPDT).`] }
+    ]
+  },
+  en: {
+    lede: "How outage.ch handles personal data. In short: no cookies, no tracking, no ads.",
+    updated: "As of 4 November 2026",
+    controllerH: "Controller",
+    sections: [
+      { h: "Visiting the website", p: [
+        "outage.ch is hosted by Cloudflare (Cloudflare, Inc., USA). When a page is requested, Cloudflare processes technically necessary data (IP address, time, requested address, browser information) to deliver the page, protect it against attacks and analyse errors. These logs are kept only briefly and are not used for profiling.",
+        "Cloudflare may process data outside Switzerland, in particular in the USA, based on the Swiss-U.S. Data Privacy Framework or standard contractual clauses."
+      ] },
+      { h: "No cookies, no tracking", p: ["outage.ch sets no cookies, stores nothing in your browser and uses no analytics, advertising or social media services."] },
+      { h: "Map", p: ["The maps load their tiles directly from the Federal Office of Topography swisstopo (vectortiles.geo.admin.ch), which, like any web server, receives your IP address and browser information."] },
+      { h: "Contact by email", p: [`If you write to ${LEGAL_ENTITY.email}, your details are used only to answer you and are deleted once no longer needed.`] },
+      { h: "Content about outages", p: ["Reports come from public sources (grid operators, authorities, media). They concern places and grid areas, not people. Names of article authors are not reproduced."] },
+      { h: "Your rights", p: [`You can request access to, correction or deletion of your personal data by writing to ${LEGAL_ENTITY.email}. You can lodge a complaint with the Federal Data Protection and Information Commissioner (FDPIC).`] }
+    ]
+  }
+};
+const copy = COPY[locale];
+const canonical = absoluteUrl(legalPath(PRIVACY_PATH, locale), SITE_ORIGIN);
+---
+
+<RadarLayout title={`${label.privacy} | outage.ch`} description={copy.lede} canonical={canonical} robots="index,follow" shell="content" locale={locale}>
+  <article class="mx-auto w-full max-w-4xl">
+    <PageHero kicker="outage.ch" title={label.privacy} lede={copy.lede} />
+    <Prose class="max-w-none text-sm md:text-[0.95rem]">
+      <p class="text-muted-foreground">{copy.updated}</p>
+      <section>
+        <h2>{copy.controllerH}</h2>
+        <p>
+          {LEGAL_ENTITY.name}, {LEGAL_ENTITY.street}, {LEGAL_ENTITY.town}<br />
+          <a href={`mailto:${LEGAL_ENTITY.email}`}>{LEGAL_ENTITY.email}</a> · <a href={legalPath(IMPRINT_PATH, locale)}>{label.imprint}</a>
+        </p>
+      </section>
+      {copy.sections.map((section) => (
+        <section>
+          <h2>{section.h}</h2>
+          {section.p.map((paragraph) => <p>{paragraph}</p>)}
+        </section>
+      ))}
+    </Prose>
+  </article>
+</RadarLayout>

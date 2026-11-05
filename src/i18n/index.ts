@@ -27,7 +27,7 @@ export function t(locale: AppLocale, key: string, options?: Record<string, unkno
 }
 
 export function homeFaqs(locale: AppLocale = "de"): Array<{ question: string; answer: string }> {
-  return (["1", "2", "3", "4"] as const).map((id) => ({
+  return (["1", "2", "3", "4", "5"] as const).map((id) => ({
     question: t(locale, `home.faq.${id}.q`),
     answer: t(locale, `home.faq.${id}.a`)
   }));
@@ -108,7 +108,9 @@ export function radarViewCopy(locale: AppLocale): RadarCopy {
       activeOne: t(locale, "ui.home.activeLabel", { count: 1 }),
       activeOther: t(locale, "ui.home.activeLabel", { count: 2 }),
       plannedOne: t(locale, "ui.home.plannedLabel", { count: 1 }),
-      plannedOther: t(locale, "ui.home.plannedLabel", { count: 2 })
+      plannedOther: t(locale, "ui.home.plannedLabel", { count: 2 }),
+      runningOne: t(locale, "ui.home.runningLabel", { count: 1 }),
+      runningOther: t(locale, "ui.home.runningLabel", { count: 2 }).replace("2", "{{count}}")
     },
     historyLink: t(locale, "ui.home.historyLink"),
     countOne: r("count", { count: 1 }).replace("1", "{{count}}"),

@@ -17,6 +17,24 @@ export const INCIDENT_DERIVATION_VERSION = "incidents/v1";
 
 /** Two records farther apart than this are separate incidents. */
 export const INCIDENT_RADIUS_METERS = 2500;
+
+/** Grid operators whose whole supply area lies in one canton (by registry operator_name). */
+export const SINGLE_CANTON_OPERATORS: Readonly<Record<string, string>> = {
+  "AIL": "TI",
+  "AIM Mendrisio": "TI",
+  "AGE Chiasso": "TI",
+  "SES": "TI",
+  "ewl Luzern": "LU",
+  "EW Davos": "GR",
+  "TB Flawil": "SG",
+  "Energie Thun": "BE",
+  "Energie Wasser Bern": "BE",
+  "ESB Biel": "BE",
+  "Energie Uster": "ZH",
+  "EKZ": "ZH",
+  "EKS": "SH",
+  "AEW": "AG"
+};
 /** Unplanned records starting further apart than this are separate incidents. */
 export const UNPLANNED_START_SPREAD_MS = 6 * 60 * 60 * 1000;
 /** Slack for "still the same incident" between one record ending and another starting. */
@@ -269,9 +287,11 @@ export function deriveIncident(records: StoredRecord[], source: IncidentSource):
   const places = municipalities.length > 0 ? municipalities : operatorPlaces;
   const locationText = places.length > 0 ? places.slice(0, 4).join(", ") : null;
   const primaryMunicipality = municipalities[0] ?? null;
-  const canton = primaryMunicipality
+  const recordCanton = primaryMunicipality
     ? records.find((record) => record.municipality === primaryMunicipality && record.canton)?.canton ?? null
     : records.find((record) => record.canton)?.canton ?? null;
+  // Operators whose grid lies in one canton (AIL, SES, ewl …) need no geocode for it.
+  const canton = recordCanton ?? SINGLE_CANTON_OPERATORS[source.operator_name] ?? null;
   if (municipalities.length === 0 && operatorPlaces.length > 0) qualityFlags.add("place_from_operator_text");
 
   const withCoords = records.filter(hasCoords);

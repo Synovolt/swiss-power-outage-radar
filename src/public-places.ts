@@ -19,7 +19,9 @@ export interface PublicPlaceInput {
 const MAX_PLACES = 12;
 const GENERIC_PLACES = new Set(["schweiz", "suisse", "svizzera", "switzerland", "unknown", "unbekannt", "region", "gemeinde"]);
 // "Commune d'Ollon" has no space after the apostrophe, hence the separate branch.
-const PREFIX = /^(?:(?:gemeinde|gemeindegebiet|stadt|ortschaft|commune de|ville de|comune di|region|région|regione|quartier|ortsteil)\s+|(?:commune|ville|comune) d['’]\s*)/i;
+const PREFIX = /^(?:(?:gemeinde|gemeindegebiet|stadt|ortschaft|feuerschaugemeinde|commune de|ville de|comune di|region|région|regione|quartier|ortsteil)\s+|(?:commune|ville|comune) d['’]\s*)/i;
+/** Organisations that appear as the first part of a location but are not places. */
+const NOT_A_PLACE = new Set(["feuerschaugemeinde", "betrieb", "betrieb-genommen"]);
 
 function cleanPart(part: string): string {
   return part
@@ -66,13 +68,14 @@ export function derivePublicPlaces(input: PublicPlaceInput): { places: PublicPla
   const add = (name: string, placeCanton: string | null) => {
     // A trailing "-<digits>" would collide with event URLs (/stromausfall/<place>-<id>).
     const slug = publicEventSlug(name).replace(/(?:-\d+)+$/, "");
-    if (!slug || slug === "schweiz" || GENERIC_PLACES.has(slug) || /^\d+$/.test(slug) || slug.length < 2) return;
+    if (!slug || slug === "schweiz" || GENERIC_PLACES.has(slug) || NOT_A_PLACE.has(slug) || /^\d+$/.test(slug) || slug.length < 2) return;
     if (seen.has(slug) || places.length >= MAX_PLACES) return;
     seen.add(slug);
     places.push({ slug, name, canton: placeCanton });
   };
 
   const named: Array<{ name: string; canton: string | null }> = [];
+  let textCanton: string | null = null;
   for (const [index, part] of parts.entries()) {
     const cantonPart = cantonByName(part);
     // "Bern", "Zug" or "Genève" are cities as well as cantons: only treat them as
@@ -80,6 +83,8 @@ export function derivePublicPlaces(input: PublicPlaceInput): { places: PublicPla
     const explicit = /^(?:kanton|canton|cantone)\b/i.test(part);
     const trailing = parts.length > 1 && index === parts.length - 1;
     if (cantonPart && (explicit || trailing || !isCityNamedCanton(part))) {
+      // A canton the source names itself outranks the canton of the map pin.
+      textCanton = textCanton ?? cantonPart.code;
       canton = canton ?? cantonPart.code;
       continue;
     }
@@ -90,7 +95,10 @@ export function derivePublicPlaces(input: PublicPlaceInput): { places: PublicPla
     if (split.name) named.push(split);
   }
 
-  if (preciseLabel && labelSplit && named.length <= 1) {
+  if (textCanton) canton = textCanton;
+  const labelAgrees = !textCanton || !labelSplit?.canton || labelSplit.canton === textCanton;
+
+  if (preciseLabel && labelSplit && labelAgrees && named.length <= 1) {
     add(labelSplit.name, labelSplit.canton ?? canton);
   } else {
     for (const part of named) add(part.name, part.canton ?? canton);

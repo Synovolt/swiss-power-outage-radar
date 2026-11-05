@@ -18,7 +18,8 @@ import Bolt from "@tabler/icons/outline/bolt.svg";
 import RadarIcon from "@tabler/icons/outline/radar-2.svg";
 import Building from "@tabler/icons/outline/building.svg";
 import Book from "@tabler/icons/outline/book-2.svg";
-import ChartBar from "@tabler/icons/outline/chart-bar.svg";
+import FirstAid from "@tabler/icons/outline/first-aid-kit.svg";
+import { IMPRINT_PATH, LEGAL_LABELS, PRIVACY_PATH, legalPath } from "../legal";
 import MapPin from "@tabler/icons/outline/map-pin.svg";
 
 interface Props {
@@ -70,7 +71,8 @@ const nav = [
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23131820'/%3E%3Cpath d='M35 8 17 37h14l-3 19 20-31H35V8Z' fill='none' stroke='%23fff' stroke-width='5' stroke-linejoin='round'/%3E%3C/svg%3E" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="description" content={pageDescription} />
     {robots && <meta name="robots" content={robots} />}
     <link rel="canonical" href={canonicalUrl} />
@@ -145,6 +147,8 @@ const nav = [
               <a href={pathFor({ kind: "guides" }, locale)}>{t(locale, "nav.guides")}</a>
               <a href={HELP_GUIDE_PATH}>{t(locale, "nav.help")}</a>
               <a href={pathFor({ kind: "about" }, locale)}>{t(locale, "nav.about")}</a>
+              <a href={legalPath(IMPRINT_PATH, locale)}>{LEGAL_LABELS[locale].imprint}</a>
+              <a href={legalPath(PRIVACY_PATH, locale)}>{LEGAL_LABELS[locale].privacy}</a>
             </nav>
           </footer>
         )}
@@ -159,9 +163,9 @@ const nav = [
           <MapPin class="size-5" aria-hidden="true" />
           {t(locale, "data.nav.places")}
         </a>
-        <a href={pathFor({ kind: "stats" }, locale)} data-nav-id="stats" aria-current={activeNav === "stats" ? "page" : undefined}>
-          <ChartBar class="size-5" aria-hidden="true" />
-          {t(locale, "data.nav.stats")}
+        <a href={HELP_GUIDE_PATH} data-nav-id="help" aria-current={activeNav === "help" ? "page" : undefined}>
+          <FirstAid class="size-5" aria-hidden="true" />
+          {t(locale, "nav.help")}
         </a>
         <a href={pathFor({ kind: "operators" }, locale)} data-nav-id="operators" aria-current={activeNav === "operators" ? "page" : undefined}>
           <Building class="size-5" aria-hidden="true" />
